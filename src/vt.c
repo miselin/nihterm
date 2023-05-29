@@ -56,6 +56,7 @@ static void mark_damage(struct vt *vt, int x, int y, int w, int h);
 
 // sequence handling
 static void handle_bracket_seq(struct vt *vt);
+static void handle_reports_seq(struct vt *vt);
 
 struct vt *vt_create(int pty, int rows, int cols) {
   struct vt *vt = (struct vt *) calloc(sizeof(struct vt), 1);
@@ -219,10 +220,55 @@ static void handle_bracket_seq(struct vt *vt) {
   char last = vt->sequence[vt->seqidx - 1];
   switch (last) {
     case 'c':
-      // what are you
+    case 'Z':
+      // Identify Terminal
+      // report VT102
       write(vt->pty, "\033[?6c", 5);
+      break;
+    case 'n':
+      handle_reports_seq(vt);
       break;
     default:
       fprintf(stderr, "unhandled bracket sequence %c\n", last);
+    }
+}
+
+static void handle_reports_seq(struct vt *vt) {
+  int param = -1;
+  char question = vt->sequence[1];
+  if (question == '?') {
+    int rc = sscanf(vt->sequence, "[?%d", &param);
+    if (rc != 1) {
+      fprintf(stderr, "nihterm: failed to parse sequence: %s\n", vt->sequence);
+      return;
+    }
+
+    switch (param) {
+    case 15:
+      // Device Status Report (Printer)
+      // report no printer
+      write(vt->pty, "\033[?13n", 6);
+      break;
+    default:
+      fprintf(stderr, "nihterm: unknown DSR request: %s\n", vt->sequence);
+    }
+  } else {
+    int rc = sscanf(vt->sequence, "[%d", &param);
+    if (rc != 1) {
+      fprintf(stderr, "nihterm: failed to parse sequence: %s\n", vt->sequence);
+      return;
+    }
+
+    switch (param) {
+    case 5:
+      // Device Status Report (VT102)
+      // report OK
+      write(vt->pty, "\033[0n", 4);
+      break;
+    case 6:
+      // Device Status Report (cursor position)
+      dprintf(vt->pty, "\033[%d;%dR", vt->cy + 1, vt->cx + 1);
+      break;
+    }
   }
 }
