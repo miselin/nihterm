@@ -16,11 +16,12 @@ include_directories(${SDL2_INCLUDE_DIRS})
 find_package(SDL2_TTF REQUIRED)
 include_directories(${SDL2_TTF_INCLUDE_DIRS})
 
-add_subdirectory(third_party)
 add_subdirectory(src)
 
 option(NIH_BUILD_TESTS "Build tests" ON)
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NIH_BUILD_TESTS)
+    add_subdirectory(third_party/gtest)
+
     enable_testing()
     add_subdirectory(test)
 endif()
