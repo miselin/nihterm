@@ -16,6 +16,7 @@ include_directories(${SDL2_INCLUDE_DIRS})
 find_package(SDL2_TTF REQUIRED)
 include_directories(${SDL2_TTF_INCLUDE_DIRS})
 
+add_subdirectory(third_party)
 add_subdirectory(src)
 
 option(NIH_BUILD_TESTS "Build tests" ON)

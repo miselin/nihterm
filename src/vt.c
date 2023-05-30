@@ -147,7 +147,20 @@ struct vt *vt_create(int pty, int rows, int cols) {
 }
 
 void vt_destroy(struct vt *vt) {
-  free(vt->screen);
+  struct row *row = vt->screen;
+  while (row) {
+    struct cell *cell = row->cells;
+    while (cell) {
+      struct cell *tmp = cell;
+      cell = cell->next;
+      free(tmp);
+    }
+
+    struct row *tmp = row;
+    row = row->next;
+    free(tmp);
+  }
+
   free(vt);
 }
 
@@ -183,22 +196,16 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 void vt_render(struct vt *vt) {
   struct damage *damage = vt->damage;
   while (damage) {
-    /*
-    graphics_clear(vt->graphics, damage->x, damage->y, damage->w, damage->h);
-
-    for (int y = damage->y; y < (damage->y + damage->h); ++y) {
-      for (int x = damage->x; x < (damage->x + damage->w); ++x) {
-        char_at(vt->graphics, x, y, vt->screen[offset(vt, x, y)].c, 0, 0);
-      }
-    }
-    */
-
     struct damage *tmp = damage;
     damage = damage->next;
     free(tmp);
   }
 
   vt->damage = NULL;
+
+  if (!vt->graphics) {
+    return;
+  }
 
   struct row *row = vt->screen;
   int y = 0;
@@ -846,10 +853,6 @@ static struct row *append_line(struct vt *vt, struct row *after) {
     vt->screen = new_row;
   }
 
-  for (int x = 0; x < vt->cols; ++x) {
-    set_char_at(vt, x, vt->rows, ' ');
-  }
-
   return new_row;
 }
 
@@ -911,4 +914,25 @@ static void insert_line(struct vt *vt) {
 
   // lazy
   vt->redraw_all = 1;
+}
+
+void vt_fill(struct vt *vt, char **buffer) {
+  *buffer = calloc(1, (size_t)((vt->rows * (vt->cols + 1)) + 1));
+
+  struct row *row = vt->screen;
+  int y = 0;
+  while (row && y < vt->rows) {
+    struct cell *cell = row->cells;
+    int x = 0;
+    while (cell && x < vt->cols) {
+      (*buffer)[(y * (vt->cols + 1)) + x] = cell->c;
+      cell = cell->next;
+      ++x;
+    }
+
+    (*buffer)[(y * (vt->cols + 1)) + x] = '\n';
+
+    row = row->next;
+    ++y;
+  }
 }

@@ -7,6 +7,10 @@
 
 struct vt;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct vt *vt_create(int pty, int rows, int cols);
 void vt_destroy(struct vt *vt);
 
@@ -19,5 +23,13 @@ int vt_process(struct vt *vt, const char *string, size_t length);
 ssize_t vt_input(struct vt *vt, const char *string, size_t length);
 
 void vt_render(struct vt *vt);
+
+// Fill the given buffer with the current state of the screen.
+// Useful for testing.
+void vt_fill(struct vt *vt, char **buffer);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif  // _NIHTERM_VT_H
