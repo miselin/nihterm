@@ -29,6 +29,13 @@ struct cellattr {
 struct cell {
   char c;
   struct cellattr attr;
+  struct cell *next;
+};
+
+struct row {
+  struct cell *cells;
+  struct row *next;
+  int dirty;
 };
 
 struct vt {
@@ -43,7 +50,11 @@ struct vt {
   int margin_top;
   int margin_bottom;
 
-  struct cell *screen;
+  struct row *screen;
+
+  struct row *margin_top_row;
+  struct row *margin_bottom_row;
+
   struct graphics *graphics;
 
   int in_sequence;
@@ -74,9 +85,9 @@ struct vt {
   } mode;
 
   struct cellattr current_attr;
-};
 
-static int offset(struct vt *vt, int x, int y) { return (y * vt->cols) + x; }
+  int redraw_all;
+};
 
 static void set_char_at(struct vt *vt, int x, int y, char c);
 
@@ -110,6 +121,16 @@ static void handle_pound_seq(struct vt *vt);
 
 static void get_params(const char *sequence, int *params, int *num_params);
 
+struct row *get_row(struct vt *vt, int y, struct row **prev);
+struct cell *get_cell(struct row *row, int x, struct cell **prev);
+
+static struct row *append_line(struct vt *vt, struct row *after);
+static void append_cell(struct vt *vt, struct row *row);
+
+static void delete_character(struct vt *vt);
+static void delete_line(struct vt *vt);
+static void insert_line(struct vt *vt);
+
 struct vt *vt_create(int pty, int rows, int cols) {
   struct vt *vt = (struct vt *)calloc(sizeof(struct vt), 1);
   vt->pty = pty;
@@ -117,8 +138,11 @@ struct vt *vt_create(int pty, int rows, int cols) {
   vt->cols = cols;
   vt->margin_top = 0;
   vt->margin_bottom = rows - 1;
-  vt->screen =
-      (struct cell *)calloc(sizeof(struct cell), (size_t)(rows * cols));
+  vt->screen = NULL;
+  struct row *prev = NULL;
+  for (int i = 0; i < rows; i++) {
+    prev = append_line(vt, prev);
+  }
   return vt;
 }
 
@@ -159,6 +183,7 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 void vt_render(struct vt *vt) {
   struct damage *damage = vt->damage;
   while (damage) {
+    /*
     graphics_clear(vt->graphics, damage->x, damage->y, damage->w, damage->h);
 
     for (int y = damage->y; y < (damage->y + damage->h); ++y) {
@@ -166,6 +191,7 @@ void vt_render(struct vt *vt) {
         char_at(vt->graphics, x, y, vt->screen[offset(vt, x, y)].c, 0, 0);
       }
     }
+    */
 
     struct damage *tmp = damage;
     damage = damage->next;
@@ -173,6 +199,28 @@ void vt_render(struct vt *vt) {
   }
 
   vt->damage = NULL;
+
+  struct row *row = vt->screen;
+  int y = 0;
+  while (row) {
+    if (row->dirty || vt->redraw_all) {
+      row->dirty = 0;
+
+      graphics_clear(vt->graphics, 0, y, vt->cols, 1);
+
+      struct cell *cell = row->cells;
+      int x = 0;
+      while (cell) {
+        char_at(vt->graphics, x++, y, cell->c, 0, 0);
+        cell = cell->next;
+      }
+    }
+
+    row = row->next;
+    ++y;
+  }
+
+  vt->redraw_all = 0;
 }
 
 static void process_char(struct vt *vt, char c) {
@@ -230,6 +278,14 @@ static void do_sequence(struct vt *vt) {
   case '\005':
     // ENQ: Enquiry
     write(vt->pty, "\033[?1;2c", 7);
+    break;
+  case 'D':
+    // Index
+    cursor_down(vt, 1);
+    break;
+  case 'M':
+    // Reverse Index
+    cursor_up(vt, 1);
     break;
   default:
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
@@ -335,7 +391,7 @@ static void get_params(const char *sequence, int *params, int *num_params) {
 }
 
 static void handle_bracket_seq(struct vt *vt) {
-  int params[6] = {0};
+  int params[6] = {1, 1, 1, 1, 1, 1};
   int num_params = 0;
 
   get_params(vt->sequence + 1, params, &num_params);
@@ -434,8 +490,21 @@ static void handle_bracket_seq(struct vt *vt) {
     break;
   case 'P':
     // DCH: Delete Character
-    memmove(&vt->screen[offset(vt, vt->cx, vt->cy)],
-            &vt->screen[offset(vt, vt->cx + 1, vt->cy)], vt->cols - vt->cx - 1);
+    for (int i = 0; i < params[0]; ++i) {
+      delete_character(vt);
+    }
+    break;
+  case 'L':
+    // IL: Insert Line
+    for (int i = 0; i < params[0]; ++i) {
+      insert_line(vt);
+    }
+    break;
+  case 'M':
+    // DL: Delete Line
+    for (int i = 0; i < params[0]; ++i) {
+      delete_line(vt);
+    }
     break;
   default:
     fprintf(stderr, "unhandled bracket sequence %c\n", last);
@@ -646,25 +715,44 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
     return;
   }
 
-  // fprintf(stderr, "set_char_at %p %d %d [%d]\n", (void *)vt, x, y, vt->cols);
-  struct cell *cell = &vt->screen[offset(vt, x, y)];
+  struct row *row = get_row(vt, y, NULL);
+  if (!row) {
+    print_error("set_char_at failed to get row %d\n", y);
+    return;
+  }
+
+  struct cell *cell = get_cell(row, x, NULL);
+  if (!cell) {
+    print_error("set_char_at failed to get cell at x=%d y=%d\n", x, y);
+    return;
+  }
+
   cell->c = c;
   cell->attr = vt->current_attr;
+
+  row->dirty = 1;
 }
 
 static void scroll_up(struct vt *vt) {
   fprintf(stderr, "scroll_up: %d %d [%d..%d]\n", vt->rows, vt->cy,
           vt->margin_top, vt->margin_bottom);
 
-  int rows = vt->margin_bottom - vt->margin_top;
+  // int rows = vt->margin_bottom - vt->margin_top;
 
-  memmove(vt->screen + (vt->margin_top * vt->cols),
-          vt->screen + ((vt->margin_top + 1) * vt->cols),
-          (size_t)((vt->cols * rows) * (int)sizeof(struct cell)));
+  struct row *prev = NULL;
+  struct row *row = get_row(vt, vt->margin_top, &prev);
 
-  for (int x = 0; x < vt->cols; ++x) {
-    set_char_at(vt, x, vt->margin_bottom, ' ');
+  if (prev) {
+    prev->next = row->next;
+  } else {
+    vt->screen = row->next;
   }
+
+  append_line(vt, NULL);
+
+  free(row);
+
+  vt->redraw_all = 1;
 
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
@@ -673,15 +761,19 @@ static void scroll_down(struct vt *vt) {
   fprintf(stderr, "scroll_down: %d %d [%d..%d]\n", vt->rows, vt->cy,
           vt->margin_top, vt->margin_bottom);
 
-  int rows = vt->margin_bottom - vt->margin_top;
+  // int rows = vt->margin_bottom - vt->margin_top;
 
-  memmove(vt->screen + ((vt->margin_top + 1) * vt->cols),
-          vt->screen + (vt->margin_top * vt->cols),
-          (size_t)((vt->cols * rows) * (int)sizeof(struct cell)));
+  struct row *prev = NULL;
+  struct row *row = get_row(vt, vt->margin_top, &prev);
 
-  for (int x = 0; x < vt->cols; ++x) {
-    set_char_at(vt, x, vt->margin_top, ' ');
-  }
+  append_line(vt, prev);
+
+  row = get_row(vt, vt->margin_bottom, &prev);
+
+  prev->next = row->next;
+  free(row);
+
+  vt->redraw_all = 1;
 
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
@@ -699,4 +791,124 @@ static void handle_pound_seq(struct vt *vt) {
   default:
     print_error("unknown pound sequence: %s\n", vt->sequence);
   }
+}
+
+struct row *get_row(struct vt *vt, int y, struct row **prev) {
+  struct row *row = vt->screen;
+  while (row && y--) {
+    if (prev) {
+      *prev = row;
+    }
+
+    row = row->next;
+  }
+
+  return row;
+}
+
+struct cell *get_cell(struct row *row, int x, struct cell **prev) {
+  struct cell *cell = row->cells;
+  while (cell && x--) {
+    if (prev) {
+      *prev = cell;
+    }
+
+    cell = cell->next;
+  }
+
+  return cell;
+}
+
+static struct row *append_line(struct vt *vt, struct row *after) {
+  struct row *row = after;
+  if (!after) {
+    // append to end of screen
+    row = vt->screen;
+    while (row) {
+      if (!row->next) {
+        break;
+      }
+
+      row = row->next;
+    }
+  }
+
+  struct row *new_row = calloc(1, sizeof(struct row));
+  for (int i = 0; i < vt->cols; ++i) {
+    append_cell(vt, new_row);
+  }
+
+  if (row) {
+    new_row->next = row->next;
+    row->next = new_row;
+  } else {
+    new_row->next = vt->screen;
+    vt->screen = new_row;
+  }
+
+  for (int x = 0; x < vt->cols; ++x) {
+    set_char_at(vt, x, vt->rows, ' ');
+  }
+
+  return new_row;
+}
+
+static void append_cell(struct vt *vt, struct row *row) {
+  struct cell *new_cell = calloc(1, sizeof(struct cell));
+  new_cell->c = ' ';
+  new_cell->attr = vt->current_attr;
+
+  struct cell *cell = row->cells;
+  if (!cell) {
+    row->cells = new_cell;
+    return;
+  }
+
+  while (cell->next) {
+    cell = cell->next;
+  }
+
+  cell->next = new_cell;
+}
+
+static void delete_character(struct vt *vt) {
+  struct cell *prev = NULL;
+  struct row *row = get_row(vt, vt->cy, NULL);
+  struct cell *cell = get_cell(row, vt->cx, &prev);
+  if (!prev) {
+    row->cells = cell->next;
+  } else {
+    prev->next = cell->next;
+  }
+
+  append_cell(vt, row);
+
+  free(cell);
+
+  row->dirty = 1;
+}
+
+static void delete_line(struct vt *vt) {
+  struct row *prev = NULL;
+  struct row *row = get_row(vt, vt->cy, &prev);
+  if (!prev) {
+    vt->screen = row->next;
+  } else {
+    prev->next = row->next;
+  }
+
+  // lazy
+  vt->redraw_all = 1;
+
+  free(row);
+
+  append_line(vt, NULL);
+}
+
+static void insert_line(struct vt *vt) {
+  struct row *row = get_row(vt, vt->cy, NULL);
+  append_line(vt, row);
+
+  // lazy
+  vt->redraw_all = 1;
 }
