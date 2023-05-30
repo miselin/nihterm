@@ -124,7 +124,10 @@ static void get_params(const char *sequence, int *params, int *num_params);
 struct row *get_row(struct vt *vt, int y, struct row **prev);
 struct cell *get_cell(struct row *row, int x, struct cell **prev);
 
+void free_row(struct row *row);
+
 static struct row *append_line(struct vt *vt, struct row *after);
+static struct row *screen_insert_line(struct vt *vt, struct row *prev);
 static void append_cell(struct vt *vt, struct row *row);
 
 static void delete_character(struct vt *vt);
@@ -529,12 +532,8 @@ static void handle_reports_seq(struct vt *vt, int *params, int num_params) {
       break;
     case 6:
       // Device Status Report (cursor position)
-      fprintf(stderr, "writing cursor pos...\n");
-      int rc = dprintf(vt->pty, "\033[%d;%dR", vt->cy + 1, vt->cx + 1);
-      if (rc <= 0) {
+      if (dprintf(vt->pty, "\033[%d;%dR", vt->cy + 1, vt->cx + 1) <= 0) {
         print_error("failed to write cursor position: %s\n", strerror(errno));
-      } else {
-        fprintf(stderr, "wrote %d bytes to %d\n", rc, vt->pty);
       }
       break;
     }
@@ -740,7 +739,7 @@ static void scroll_up(struct vt *vt) {
 
   append_line(vt, NULL);
 
-  free(row);
+  free_row(row);
 
   vt->redraw_all = 1;
 
@@ -761,7 +760,7 @@ static void scroll_down(struct vt *vt) {
   row = get_row(vt, vt->margin_bottom, &prev);
 
   prev->next = row->next;
-  free(row);
+  free_row(row);
 
   vt->redraw_all = 1;
 
@@ -823,14 +822,18 @@ static struct row *append_line(struct vt *vt, struct row *after) {
     }
   }
 
+  return screen_insert_line(vt, row);
+}
+
+static struct row *screen_insert_line(struct vt *vt, struct row *prev) {
   struct row *new_row = calloc(1, sizeof(struct row));
   for (int i = 0; i < vt->cols; ++i) {
     append_cell(vt, new_row);
   }
 
-  if (row) {
-    new_row->next = row->next;
-    row->next = new_row;
+  if (prev) {
+    new_row->next = prev->next;
+    prev->next = new_row;
   } else {
     new_row->next = vt->screen;
     vt->screen = new_row;
@@ -858,8 +861,6 @@ static void append_cell(struct vt *vt, struct row *row) {
 }
 
 static void delete_character(struct vt *vt) {
-  fprintf(stderr, "delete_character at %d\n", vt->cx);
-
   struct cell *prev = NULL;
   struct row *row = get_row(vt, vt->cy, NULL);
   struct cell *cell = get_cell(row, vt->cx, &prev);
@@ -888,14 +889,18 @@ static void delete_line(struct vt *vt) {
   // lazy
   vt->redraw_all = 1;
 
-  free(row);
+  free_row(row);
 
   append_line(vt, NULL);
 }
 
 static void insert_line(struct vt *vt) {
-  struct row *row = get_row(vt, vt->cy, NULL);
-  append_line(vt, row);
+  struct row *prev = NULL;
+  if (vt->cy > 0) {
+    prev = get_row(vt, vt->cy, NULL);
+  }
+
+  screen_insert_line(vt, prev);
 
   // lazy
   vt->redraw_all = 1;
@@ -935,4 +940,15 @@ static ssize_t write_retry(int fd, const char *buffer, size_t length) {
 
     return rc;
   }
+}
+
+void free_row(struct row *row) {
+  struct cell *cell = row->cells;
+  while (cell) {
+    struct cell *tmp = cell;
+    cell = cell->next;
+    free(tmp);
+  }
+
+  free(row);
 }

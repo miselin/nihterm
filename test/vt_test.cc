@@ -135,13 +135,57 @@ TEST(VTTest, Overwrite) {
   delete[] testdata;
 }
 
-TEST(VTTest, DCH) {
+TEST(VTTest, VT102_DCH) {
   struct teststate state;
 
   const char *testdata = read_testdata("test/testdata/basic.dat");
   EXPECT_NE(testdata, nullptr);
 
   const char *teststr = "EHello, typo world!\033[11D\033[5P\r\033[P\n";
+
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT102_DL) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/basic.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "Second line!\r\nHello, world!\033[H\033[M";
+
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT102_IL) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/twolines.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "Second line!\r\033[LHello, world!";
 
   vt_process(state.vt, teststr, strlen(teststr));
 
