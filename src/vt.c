@@ -131,6 +131,8 @@ static void delete_character(struct vt *vt);
 static void delete_line(struct vt *vt);
 static void insert_line(struct vt *vt);
 
+static ssize_t write_retry(int fd, const char *buffer, size_t length);
+
 struct vt *vt_create(int pty, int rows, int cols) {
   struct vt *vt = (struct vt *)calloc(sizeof(struct vt), 1);
   vt->pty = pty;
@@ -284,7 +286,7 @@ static void do_sequence(struct vt *vt) {
     break;
   case '\005':
     // ENQ: Enquiry
-    write(vt->pty, "\033[?1;2c", 7);
+    write_retry(vt->pty, "\033[?1;2c", 7);
     break;
   case 'D':
     // Index
@@ -432,7 +434,7 @@ static void handle_bracket_seq(struct vt *vt) {
   case 'Z':
     // Identify Terminal
     // report VT102
-    write(vt->pty, "\033[?6c", 5);
+    write_retry(vt->pty, "\033[?6c", 5);
     break;
   case 'n':
     handle_reports_seq(vt);
@@ -532,7 +534,7 @@ static void handle_reports_seq(struct vt *vt) {
     case 15:
       // Device Status Report (Printer)
       // report no printer
-      write(vt->pty, "\033[?13n", 6);
+      write_retry(vt->pty, "\033[?13n", 6);
       break;
     default:
       fprintf(stderr, "nihterm: unknown DSR request: %s\n", vt->sequence);
@@ -548,7 +550,7 @@ static void handle_reports_seq(struct vt *vt) {
     case 5:
       // Device Status Report (VT102)
       // report OK
-      write(vt->pty, "\033[0n", 4);
+      write_retry(vt->pty, "\033[0n", 4);
       break;
     case 6:
       // Device Status Report (cursor position)
@@ -934,5 +936,18 @@ void vt_fill(struct vt *vt, char **buffer) {
 
     row = row->next;
     ++y;
+  }
+}
+
+static ssize_t write_retry(int fd, const char *buffer, size_t length) {
+  while (1) {
+    ssize_t rc = write(fd, buffer, length);
+    if (rc < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+    }
+
+    return rc;
   }
 }
