@@ -60,28 +60,6 @@ int main(int argc, char *argv[]) {
 
   printf("pty is %s\n", name);
 
-  struct graphics *graphics = create_graphics();
-  if (!graphics) {
-    fprintf(stderr, "nihterm: failed to initialize graphics\n");
-    return 1;
-  }
-
-  struct vt *vt = vt_create(pty, 25, 80);
-  if (!vt) {
-    fprintf(stderr, "nihterm: failed to initialize vt\n");
-    return 1;
-  }
-
-  vt_set_graphics(vt, graphics);
-
-  struct winsize pty_size;
-  memset(&pty_size, 0, sizeof(pty_size));
-  pty_size.ws_col = 80;
-  pty_size.ws_row = 25;
-  pty_size.ws_xpixel = (uint16_t) window_width(graphics);
-  pty_size.ws_ypixel = (uint16_t) window_height(graphics);
-  ioctl(pty, TIOCSWINSZ, &pty_size);
-
   // spin up our SIGCHLD reaper now that we've configured the PTY
   signal(SIGCHLD, sigchld);
 
@@ -110,10 +88,33 @@ int main(int argc, char *argv[]) {
     setenv("LC_ALL", "en_US.UTF-8", 1);
 
     execl("/usr/bin/vttest", "/usr/bin/vttest", NULL);
+    // execl("/bin/bash", "/bin/bash", NULL);
 
     fprintf(stderr, "nihterm: exit failed: %s\n", strerror(errno));
     exit(1);
   }
+
+  struct graphics *graphics = create_graphics();
+  if (!graphics) {
+    fprintf(stderr, "nihterm: failed to initialize graphics\n");
+    return 1;
+  }
+
+  struct vt *vt = vt_create(pty, 25, 80);
+  if (!vt) {
+    fprintf(stderr, "nihterm: failed to initialize vt\n");
+    return 1;
+  }
+
+  vt_set_graphics(vt, graphics);
+
+  struct winsize pty_size;
+  memset(&pty_size, 0, sizeof(pty_size));
+  pty_size.ws_col = 80;
+  pty_size.ws_row = 25;
+  pty_size.ws_xpixel = (uint16_t)window_width(graphics);
+  pty_size.ws_ypixel = (uint16_t)window_height(graphics);
+  ioctl(pty, TIOCSWINSZ, &pty_size);
 
   const size_t maxBuffSize = 32768;
   char buffer[maxBuffSize];
@@ -173,6 +174,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  vt_destroy(vt);
   destroy_graphics(graphics);
 
   return 0;

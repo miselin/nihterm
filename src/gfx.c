@@ -60,6 +60,8 @@ struct graphics *create_graphics() {
   SDL_RenderClear(graphics->renderer);
   SDL_RenderPresent(graphics->renderer);
 
+  graphics->dirty = 1;
+
   return graphics;
 }
 
