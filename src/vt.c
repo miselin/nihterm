@@ -114,7 +114,7 @@ static void scroll_down(struct vt *vt);
 
 // sequence handling
 static void handle_bracket_seq(struct vt *vt);
-static void handle_reports_seq(struct vt *vt);
+static void handle_reports_seq(struct vt *vt, int *params, int num_params);
 static void handle_modes(struct vt *vt, int set);
 static void handle_erases(struct vt *vt, int line, int n);
 static void handle_pound_seq(struct vt *vt);
@@ -180,19 +180,7 @@ int vt_process(struct vt *vt, const char *string, size_t length) {
 }
 
 ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
-  while (1) {
-    ssize_t rc = write(vt->pty, string, length);
-    if (rc < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-
-      fprintf(stderr, "nihterm: vt_input failed: %s\n", strerror(errno));
-      return -1;
-    } else {
-      return rc;
-    }
-  }
+  return write_retry(vt->pty, string, length);
 }
 
 void vt_render(struct vt *vt) {
@@ -437,7 +425,7 @@ static void handle_bracket_seq(struct vt *vt) {
     write_retry(vt->pty, "\033[?6c", 5);
     break;
   case 'n':
-    handle_reports_seq(vt);
+    handle_reports_seq(vt, params, num_params);
     break;
   case 'A':
     if (num_params != 1) {
@@ -473,12 +461,10 @@ static void handle_bracket_seq(struct vt *vt) {
     if (vt->seqidx == 2) {
       // CUP/HVP: Home
       cursor_home(vt);
-    } else if (num_params == 2) {
-      // CUP/HVP: position
-      // line ; column
-      cursor_to(vt, params[1] - 1, params[0] - 1);
     } else {
-      print_error("CUP/HVP: expected 0 or 2 parameters\n");
+      // CUP/HVP: position
+      // line ; column, default value is 1
+      cursor_to(vt, params[1] - 1, params[0] - 1);
     }
     break;
   case 'm':
@@ -520,17 +506,12 @@ static void handle_bracket_seq(struct vt *vt) {
   }
 }
 
-static void handle_reports_seq(struct vt *vt) {
-  int param = -1;
+static void handle_reports_seq(struct vt *vt, int *params, int num_params) {
+  (void)num_params;
+
   char question = vt->sequence[1];
   if (question == '?') {
-    int rc = sscanf(vt->sequence, "[?%d", &param);
-    if (rc != 1) {
-      fprintf(stderr, "nihterm: failed to parse sequence: %s\n", vt->sequence);
-      return;
-    }
-
-    switch (param) {
+    switch (params[0]) {
     case 15:
       // Device Status Report (Printer)
       // report no printer
@@ -540,13 +521,7 @@ static void handle_reports_seq(struct vt *vt) {
       fprintf(stderr, "nihterm: unknown DSR request: %s\n", vt->sequence);
     }
   } else {
-    int rc = sscanf(vt->sequence, "[%d", &param);
-    if (rc != 1) {
-      fprintf(stderr, "nihterm: failed to parse sequence: %s\n", vt->sequence);
-      return;
-    }
-
-    switch (param) {
+    switch (params[0]) {
     case 5:
       // Device Status Report (VT102)
       // report OK
@@ -554,7 +529,13 @@ static void handle_reports_seq(struct vt *vt) {
       break;
     case 6:
       // Device Status Report (cursor position)
-      dprintf(vt->pty, "\033[%d;%dR", vt->cy + 1, vt->cx + 1);
+      fprintf(stderr, "writing cursor pos...\n");
+      int rc = dprintf(vt->pty, "\033[%d;%dR", vt->cy + 1, vt->cx + 1);
+      if (rc <= 0) {
+        print_error("failed to write cursor position: %s\n", strerror(errno));
+      } else {
+        fprintf(stderr, "wrote %d bytes to %d\n", rc, vt->pty);
+      }
       break;
     }
   }
@@ -946,6 +927,8 @@ static ssize_t write_retry(int fd, const char *buffer, size_t length) {
       if (errno == EINTR) {
         continue;
       }
+
+      fprintf(stderr, "nihterm: write_retry failed: %s\n", strerror(errno));
     }
 
     return rc;
