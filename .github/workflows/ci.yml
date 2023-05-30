@@ -1,0 +1,57 @@
+name: build and test
+
+on:
+  push:
+    branches: [ $default-branch ]
+  pull_request:
+    branches: [ $default-branch ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Debug
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Debug
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug
+
+  test_asan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Debug -DNIH_USE_ASAN=ON
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Debug
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug
+
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release -DNIH_ENABLE_CLANG_TIDY=ON -DNIH_ENABLE_CPPCHECK=ON
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release
