@@ -306,7 +306,7 @@ static void cursor_fwd(struct vt *vt, int num) {
 
 static void cursor_back(struct vt *vt, int num) {
   if (vt->cx >= num) {
-    vt->cx--;
+    vt->cx -= num;
   } else {
     vt->cx = 0;
   }
@@ -858,6 +858,8 @@ static void append_cell(struct vt *vt, struct row *row) {
 }
 
 static void delete_character(struct vt *vt) {
+  fprintf(stderr, "delete_character at %d\n", vt->cx);
+
   struct cell *prev = NULL;
   struct row *row = get_row(vt, vt->cy, NULL);
   struct cell *cell = get_cell(row, vt->cx, &prev);

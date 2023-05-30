@@ -10,6 +10,9 @@ include("CMakeDependentOption")
 include("cmake/compiler.cmake")
 include("cmake/analysis.cmake")
 
+include(CodeCoverage)
+append_coverage_compiler_flags()
+
 find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIRS})
 
