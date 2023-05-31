@@ -426,6 +426,28 @@ TEST(VTTest, VT100_EL_Start) {
   delete[] testdata;
 }
 
+TEST(VTTest, VT102_IRM) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/basic.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "world!\033[H\033[4hHello, ";
+
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
 TEST(VTTest, VT100_CPR) {
   struct teststate state;
 
@@ -625,7 +647,7 @@ TEST(VTTest, VT100_ENQ) {
 
   char buf[64] = {0};
 
-  const char *teststr = "\033\005";
+  const char *teststr = "\005";
   vt_process(state.vt, teststr, strlen(teststr));
 
   ssize_t rc = read_timeout(state.pty_child, buf, 64, 2);

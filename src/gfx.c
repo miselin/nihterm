@@ -196,5 +196,8 @@ void graphics_resize(struct graphics *graphics, int cols, int rows) {
     return;
   }
 
+  graphics->xdim = new_xdim;
+  graphics->ydim = new_ydim;
+
   SDL_SetWindowSize(graphics->window, (int)new_xdim, (int)new_ydim);
 }

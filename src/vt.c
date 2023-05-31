@@ -48,7 +48,7 @@ struct vt {
   struct graphics *graphics;
 
   int in_sequence;
-  char sequence[16];
+  char sequence[64];
   int seqidx;
 
   struct damage *damage;
@@ -79,12 +79,18 @@ struct vt {
 
   struct cellattr current_attr;
 
+  int saved_x;
+  int saved_y;
+  int saved_charset;
+  struct cellattr saved_attr;
+
   int redraw_all;
 
   char tabstops[132];
 };
 
 static void set_char_at(struct vt *vt, int x, int y, char c);
+static void insert_char_at(struct vt *vt, int x, int y, char c);
 
 static void cursor_fwd(struct vt *vt, int count);
 static void cursor_back(struct vt *vt, int count);
@@ -245,7 +251,11 @@ static void process_char(struct vt *vt, char c) {
   } else if (c == '\033') {
     vt->in_sequence = 1;
   } else if (isprint(c)) {
-    set_char_at(vt, vt->cx, vt->cy, c);
+    if (vt->mode.irm) {
+      insert_char_at(vt, vt->cx, vt->cy, c);
+    } else {
+      set_char_at(vt, vt->cx, vt->cy, c);
+    }
     mark_damage(vt, vt->cx, vt->cy, 1, 1);
     cursor_fwd(vt, 1);
   } else {
@@ -273,6 +283,20 @@ static void process_char(struct vt *vt, char c) {
       break;
     case '\017':
       vt->charset = 0;
+      break;
+    case '7':
+      // DECSC - Save Cursor
+      vt->saved_x = vt->cx;
+      vt->saved_y = vt->cy;
+      vt->saved_attr = vt->current_attr;
+      vt->saved_charset = vt->charset;
+      break;
+    case '8':
+      // DECRC - Restore Cursor
+      vt->cx = vt->saved_x;
+      vt->cy = vt->saved_y;
+      vt->current_attr = vt->saved_attr;
+      vt->charset = vt->saved_charset;
       break;
     default:
       fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
@@ -448,6 +472,8 @@ static void handle_bracket_seq(struct vt *vt) {
   int num_params = 0;
 
   get_params(vt->sequence + 1, params, &num_params);
+  fprintf(stderr, "params for %s: %d %d %d %d %d %d\n", vt->sequence, params[0],
+          params[1], params[2], params[3], params[4], params[5]);
 
   char last = vt->sequence[vt->seqidx - 1];
   switch (last) {
@@ -612,6 +638,8 @@ static void handle_modes(struct vt *vt, int set) {
       } else {
         vt->cols = 80;
       }
+      erase_screen(vt);
+      cursor_home(vt);
       graphics_resize(vt->graphics, vt->cols, vt->rows);
       vt->margin_right = vt->cols;
       break;
@@ -761,6 +789,28 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
     print_error("set_char_at failed to get row %d\n", y);
     return;
   }
+
+  row->cells[x].c = c;
+  row->cells[x].attr = vt->current_attr;
+
+  row->dirty = 1;
+}
+
+static void insert_char_at(struct vt *vt, int x, int y, char c) {
+  if (x >= vt->cols || y >= vt->rows) {
+    print_error("insert_char_at out of bounds (%d, %d)\n", x, y);
+    return;
+  }
+
+  struct row *row = get_row(vt, y, NULL);
+  if (!row) {
+    print_error("insert_char_at failed to get row %d\n", y);
+    return;
+  }
+
+  // move characters right. last character is lost.
+  memmove(&row->cells[x + 1], &row->cells[x],
+          sizeof(struct cell) * (size_t)(vt->cols - x - 1));
 
   row->cells[x].c = c;
   row->cells[x].attr = vt->current_attr;
