@@ -120,15 +120,8 @@ size_t window_width(struct graphics *graphics) { return graphics->xdim; }
 size_t window_height(struct graphics *graphics) { return graphics->ydim; }
 
 int process_queue(struct graphics *graphics) {
-  (void)graphics;
-
   // render any pending updates from the VT
   vt_render(graphics->vt);
-
-  if (graphics->dirty) {
-    SDL_RenderPresent(graphics->renderer);
-    graphics->dirty = 0;
-  }
 
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
@@ -146,7 +139,23 @@ int process_queue(struct graphics *graphics) {
         vt_input(graphics->vt, "\n", 1);
         break;
       }
+      break;
+    case SDL_WINDOWEVENT:
+      switch (event.window.event) {
+      case SDL_WINDOWEVENT_EXPOSED:
+        // requires a redraw
+        graphics->dirty = 1;
+        break;
+      }
+      break;
+    default:
+      fprintf(stderr, "unhandled event: %d\n", event.type);
     }
+  }
+
+  if (graphics->dirty) {
+    SDL_RenderPresent(graphics->renderer);
+    graphics->dirty = 0;
   }
 
   return 0;

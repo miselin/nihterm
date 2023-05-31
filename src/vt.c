@@ -53,9 +53,6 @@ struct vt {
 
   struct damage *damage;
 
-  // VT100 status/attributes/modes
-  int sgr;
-
   // modes
   struct {
     int kam;
@@ -102,6 +99,8 @@ static void cursor_sol(struct vt *vt);
 
 static void process_char(struct vt *vt, char c);
 static void do_sequence(struct vt *vt);
+static void do_vt52(struct vt *vt);
+static void end_sequence(struct vt *vt);
 
 static void mark_damage(struct vt *vt, int x, int y, int w, int h);
 
@@ -155,6 +154,10 @@ struct vt *vt_create(int pty, int rows, int cols) {
   for (int i = 0; i < 132; i++) {
     vt->tabstops[i] = (i % 8 == 0);
   }
+
+  // set default modes
+  vt->mode.decanm = 1;
+
   return vt;
 }
 
@@ -189,6 +192,18 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 void vt_render(struct vt *vt) {
   struct damage *damage = vt->damage;
   while (damage) {
+    // redraw_all hits a different code path
+    if (vt->graphics && !vt->redraw_all) {
+      graphics_clear(vt->graphics, damage->x, damage->y, damage->w, damage->h);
+
+      for (int y = damage->y; y < (damage->y + damage->h); ++y) {
+        struct row *row = get_row(vt, y, NULL);
+        for (int x = damage->x; x < (damage->x + damage->w); ++x) {
+          char_at(vt->graphics, x, y, &row->cells[x]);
+        }
+      }
+    }
+
     struct damage *tmp = damage;
     damage = damage->next;
     free(tmp);
@@ -198,21 +213,20 @@ void vt_render(struct vt *vt) {
 
   if (!vt->graphics) {
     return;
+  } else if (!vt->redraw_all) {
+    return;
   }
+
+  graphics_clear(vt->graphics, 0, 0, vt->cols, vt->rows);
 
   struct row *row = vt->screen;
   int y = 0;
   while (row) {
-    if (row->dirty || vt->redraw_all) {
-      row->dirty = 0;
-
-      graphics_clear(vt->graphics, 0, y, vt->cols, 1);
-
-      for (int i = 0; i < vt->cols; i++) {
-        char_at(vt->graphics, i, y, &row->cells[i]);
-      }
+    for (int i = 0; i < vt->cols; i++) {
+      char_at(vt->graphics, i, y, &row->cells[i]);
     }
 
+    row->dirty = 0;
     row = row->next;
     ++y;
   }
@@ -221,6 +235,9 @@ void vt_render(struct vt *vt) {
 }
 
 static void process_char(struct vt *vt, char c) {
+  fprintf(stderr, "process: '%c' / %d\n",
+          c == '\033' ? '~' : (isprint(c) ? c : '-'), c);
+
   // VT100 ignores NUL and DEL
   if (c == 0 || c == '\177') {
     return;
@@ -229,12 +246,16 @@ static void process_char(struct vt *vt, char c) {
   if (vt->in_sequence) {
     if (c == '\030' || c == '\032') {
       // CAN, SUB - cancel sequence
-      vt->in_sequence = 0;
-      vt->seqidx = 0;
+      end_sequence(vt);
       return;
     }
 
     vt->sequence[vt->seqidx++] = c;
+
+    if (!vt->mode.decanm) {
+      do_vt52(vt);
+      return;
+    }
 
     if (vt->seqidx == 1 && !isalpha(c) && !iscntrl(c)) {
       return;
@@ -253,11 +274,13 @@ static void process_char(struct vt *vt, char c) {
   } else if (isprint(c)) {
     if (vt->mode.irm) {
       insert_char_at(vt, vt->cx, vt->cy, c);
+      mark_damage(vt, vt->cx, vt->cy, vt->cols - vt->cx, 1);
     } else {
       set_char_at(vt, vt->cx, vt->cy, c);
+      mark_damage(vt, vt->cx, vt->cy, 1, 1);
     }
-    mark_damage(vt, vt->cx, vt->cy, 1, 1);
     cursor_fwd(vt, 1);
+    fprintf(stderr, "cursor: %d, %d\n", vt->cx, vt->cy);
   } else {
     switch (c) {
     case '\005':
@@ -342,8 +365,7 @@ static void do_sequence(struct vt *vt) {
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
   }
 
-  vt->seqidx = 0;
-  vt->in_sequence = 0;
+  end_sequence(vt);
 }
 
 static void cursor_fwd(struct vt *vt, int num) {
@@ -472,7 +494,8 @@ static void handle_bracket_seq(struct vt *vt) {
   int num_params = 0;
 
   get_params(vt->sequence + 1, params, &num_params);
-  fprintf(stderr, "params for %s: %d %d %d %d %d %d\n", vt->sequence, params[0],
+
+  fprintf(stderr, "params: count=%d %d %d %d %d %d %d\n", num_params, params[0],
           params[1], params[2], params[3], params[4], params[5]);
 
   char last = vt->sequence[vt->seqidx - 1];
@@ -502,6 +525,7 @@ static void handle_bracket_seq(struct vt *vt) {
     break;
   case 'J':
   case 'K':
+    fprintf(stderr, "cursor: %d, %d\n", vt->cx, vt->cy);
     handle_erases(vt, last == 'J' ? 0 : 1, num_params == 1 ? params[0] : 0);
     break;
   case 'l':
@@ -709,12 +733,15 @@ static void handle_modes(struct vt *vt, int set) {
 }
 
 static void handle_erases(struct vt *vt, int line, int n) {
+  fprintf(stderr, "erase %d %d\n", line, n);
   switch (n) {
   case 0:
     // cursor to end of line/screen
     if (line == 1) {
+      fprintf(stderr, "erase cursor to end of line\n");
       erase_line_cursor(vt, 0);
     } else {
+      fprintf(stderr, "erase cursor to end of screen\n");
       erase_screen_cursor(vt, 0);
     }
     break;
@@ -756,8 +783,10 @@ static void erase_screen(struct vt *vt) {
 }
 
 static void erase_line_cursor(struct vt *vt, int before) {
+  fprintf(stderr, "erase_line_cursor: before=%d cx=%d\n", before, vt->cx);
   int sx = before ? 0 : vt->cx;
   int ex = before ? vt->cx : vt->cols;
+  fprintf(stderr, "erase_line_cursor: %d %d\n", sx, ex);
   for (int x = sx; x < ex; ++x) {
     set_char_at(vt, x, vt->cy, ' ');
   }
@@ -1016,4 +1045,75 @@ static int next_tabstop(struct vt *vt, int x) {
   }
 
   return vt->cols - 1;
+}
+
+static void do_vt52(struct vt *vt) {
+  fprintf(stderr, "vt52: %s\n", vt->sequence);
+
+  switch (vt->sequence[0]) {
+  case 'A':
+    cursor_up(vt, 1);
+    break;
+  case 'B':
+    cursor_down(vt, 1);
+    break;
+  case 'C':
+    cursor_fwd(vt, 1);
+    break;
+  case 'D':
+    cursor_back(vt, 1);
+    break;
+  case 'F':
+    // Select Special Graphics character set
+    break;
+  case 'G':
+    // Select ASCII character set
+    break;
+  case 'H':
+    cursor_home(vt);
+    break;
+  case 'I':
+    cursor_up(vt, 1);
+    break;
+  case 'J':
+    erase_screen_cursor(vt, 0);
+    break;
+  case 'K':
+    erase_line_cursor(vt, 0);
+    break;
+  case 'Y':
+    // Direct cursor address - has two params
+    if (vt->seqidx < 3) {
+      return;
+    }
+
+    char l = vt->sequence[1];
+    char c = vt->sequence[2];
+    cursor_to(vt, c - 037 - 1, l - 037 - 1);
+    break;
+  case 'Z':
+    // Identify
+    write_retry(vt->pty, "\033/Z", 3);
+    break;
+  case '=':
+    // Enter alternate keypad mode
+    break;
+  case '>':
+    // Exit alternate keypad mode
+    break;
+  case '<':
+    // Enter ANSI mode
+    vt->mode.decanm = 1;
+    break;
+  default:
+    print_error("unknown vt52 sequence: %s\n", vt->sequence);
+  }
+
+  end_sequence(vt);
+}
+
+static void end_sequence(struct vt *vt) {
+  vt->in_sequence = 0;
+  vt->seqidx = 0;
+  memset(vt->sequence, 0, sizeof(vt->sequence));
 }

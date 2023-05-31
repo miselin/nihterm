@@ -84,11 +84,14 @@ int main(int argc, char *argv[]) {
     dup2(fd, 1);
     dup2(fd, 2);
 
-    setenv("TERM", "vt100", 1);
-    setenv("LC_ALL", "en_US.UTF-8", 1);
+    setenv("TERM", "vt102", 1);
 
-    execl("/usr/bin/vttest", "/usr/bin/vttest", NULL);
-    // execl("/bin/bash", "/bin/bash", NULL);
+    // TODO(miselin): implement UTF8
+    // setenv("LC_ALL", "en_US.UTF-8", 1);
+    setenv("LC_ALL", "C", 1);
+
+    // execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
+    execl("/bin/bash", "/bin/bash", NULL);
 
     fprintf(stderr, "nihterm: exit failed: %s\n", strerror(errno));
     exit(1);
@@ -117,7 +120,7 @@ int main(int argc, char *argv[]) {
   ioctl(pty, TIOCSWINSZ, &pty_size);
 
   const size_t maxBuffSize = 32768;
-  char buffer[maxBuffSize];
+  char *buffer = (char *)malloc(maxBuffSize);
   while (1) {
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -164,6 +167,8 @@ int main(int argc, char *argv[]) {
       break;
     }
   }
+
+  free(buffer);
 
   vt_destroy(vt);
   destroy_graphics(graphics);
