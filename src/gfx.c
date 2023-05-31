@@ -189,3 +189,12 @@ void graphics_clear(struct graphics *graphics, int x, int y, int w, int h) {
   SDL_RenderFillRect(graphics->renderer, &target);
 }
 
+void graphics_resize(struct graphics *graphics, int cols, int rows) {
+  size_t new_xdim = (size_t)cols * graphics->cellw;
+  size_t new_ydim = (size_t)rows * graphics->cellh;
+  if (new_xdim == graphics->xdim && new_ydim == graphics->ydim) {
+    return;
+  }
+
+  SDL_SetWindowSize(graphics->window, (int)new_xdim, (int)new_ydim);
+}

@@ -581,6 +581,13 @@ static void handle_modes(struct vt *vt, int set) {
     case 3:
       // DECCOLM (set = 132, reset = 80)
       vt->mode.deccolm = set;
+      if (vt->mode.deccolm) {
+        vt->cols = 132;
+      } else {
+        vt->cols = 80;
+      }
+      graphics_resize(vt->graphics, vt->cols, vt->rows);
+      vt->margin_right = vt->cols;
       break;
     case 4:
       // DECSCLM (set = Smooth, reset = Jump)
