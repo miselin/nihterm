@@ -217,6 +217,215 @@ TEST(VTTest, VT102_IL) {
   delete[] testdata;
 }
 
+TEST(VTTest, ScrollUp) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/alphabet.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  for (char c = 'A'; c <= 'Z'; c++) {
+    char buf[4] = {c, '\r', '\n', '\0'};
+    vt_process(state.vt, buf, c == 'Z' ? 1 : 3);
+  }
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, ScrollDown) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/line_inserted.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "Hello, world!\033M";
+
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, ScrollDown_Alphabet) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/alphabet_alt.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  for (char c = 'A'; c <= 'X'; c++) {
+    char buf[4] = {c, '\r', '\n', '\0'};
+    vt_process(state.vt, buf, c == 'X' ? 1 : 3);
+  }
+
+  const char *teststr = "\033[H\033M";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_ED_All) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/empty.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "\033#8\033[2J";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_ED_End) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/alignment_half.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "\033#8\033[13;1H\033[0J";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_ED_Start) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/alignment_half_alt.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  const char *teststr = "\033#8\033[13;1H\033[1J";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_EL_All) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/empty.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  for (int i = 0; i < 80; ++i) {
+    vt_process(state.vt, "*", 1);
+  }
+
+  const char *teststr = "\033[1;1H\033[2K";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_EL_End) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/line_right.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  for (int i = 0; i < 80; ++i) {
+    vt_process(state.vt, "*", 1);
+  }
+
+  const char *teststr = "\033[1;40H\033[1K";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_EL_Start) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/line_left.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  for (int i = 0; i < 80; ++i) {
+    vt_process(state.vt, "*", 1);
+  }
+
+  const char *teststr = "\033[1;40H\033[0K";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
 TEST(VTTest, VT100_CPR) {
   struct teststate state;
 

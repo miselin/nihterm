@@ -250,6 +250,10 @@ static void process_char(struct vt *vt, char c) {
     cursor_fwd(vt, 1);
   } else {
     switch (c) {
+    case '\005':
+      // ENQ: Enquiry
+      write_retry(vt->pty, "\033[?1;2c", 7);
+      break;
     case '\010':
       cursor_back(vt, 1);
       break;
@@ -262,7 +266,7 @@ static void process_char(struct vt *vt, char c) {
       cursor_sol(vt);
       break;
     case '\t':
-      vt->cx = next_tabstop(vt, vt->cx);
+      cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy);
       break;
     case '\016':
       vt->charset = 1;
@@ -293,10 +297,6 @@ static void do_sequence(struct vt *vt) {
     cursor_down(vt, 1);
     cursor_sol(vt);
     break;
-  case '\005':
-    // ENQ: Enquiry
-    write_retry(vt->pty, "\033[?1;2c", 7);
-    break;
   case 'D':
     // Index
     cursor_down(vt, 1);
@@ -323,62 +323,88 @@ static void do_sequence(struct vt *vt) {
 }
 
 static void cursor_fwd(struct vt *vt, int num) {
-  vt->cx += num;
-  if (vt->cx >= vt->cols) {
-    if (vt->mode.decawm) {
-      cursor_down(vt, 1);
-      cursor_sol(vt);
-    } else {
-      vt->cx = vt->cols - 1;
-    }
-  }
+  cursor_to(vt, vt->cx + num, vt->cy);
 }
 
 static void cursor_back(struct vt *vt, int num) {
-  if (vt->cx >= num) {
-    vt->cx -= num;
-  } else {
-    vt->cx = 0;
-  }
+  cursor_to(vt, vt->cx - num, vt->cy);
 }
 
-static void cursor_sol(struct vt *vt) { vt->cx = 0; }
+static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy); }
 
-static void cursor_home(struct vt *vt) {
-  vt->cx = 0;
-  vt->cy = vt->margin_top;
-}
+static void cursor_home(struct vt *vt) { cursor_to(vt, 0, 0); }
 
 static void cursor_down(struct vt *vt, int num) {
-  vt->cy += num;
-
-  if (vt->cy >= vt->margin_bottom) {
-    int lines = vt->cy - vt->margin_bottom + 1;
-    for (int line = 0; line < lines; ++line) {
-      scroll_up(vt);
-    }
-
-    vt->cy = vt->margin_bottom - 1;
-  }
+  cursor_to(vt, vt->cx, vt->cy + num);
 }
 
 static void cursor_up(struct vt *vt, int num) {
-  vt->cy -= num;
-
-  if (vt->cy <= vt->margin_top) {
-    int rows = vt->margin_top - vt->cy + 1;
-
-    for (int i = 0; i < rows; ++i) {
-      scroll_down(vt);
-    }
-
-    vt->cy = vt->margin_top;
-  }
+  cursor_to(vt, vt->cx, vt->cy - num);
 }
 
 static void cursor_to(struct vt *vt, int x, int y) {
   vt->cx = x;
   vt->cy = y;
+
+  if (vt->mode.decom) {
+    if (vt->cx < vt->margin_left) {
+      vt->cx = vt->margin_left;
+    } else if (vt->cx >= vt->margin_right) {
+      if (vt->mode.decawm) {
+        int overflow = vt->margin_right - vt->cx;
+        cursor_sol(vt);
+        cursor_down(vt, 1);
+        cursor_fwd(vt, overflow);
+      } else {
+        vt->cx = vt->margin_right - 1;
+      }
+    }
+
+    if (vt->cy < vt->margin_top) {
+      int rows = vt->margin_top - vt->cy;
+      for (int i = 0; i < rows; ++i) {
+        scroll_down(vt);
+      }
+
+      vt->cy = vt->margin_top;
+    } else if (vt->cy >= vt->margin_bottom) {
+      int rows = (vt->margin_bottom - vt->cy) + 1;
+      for (int i = 0; i < rows; ++i) {
+        scroll_up(vt);
+      }
+
+      vt->cy = vt->margin_bottom - 1;
+    }
+  } else {
+    if (vt->cx < 0) {
+      vt->cx = 0;
+    } else if (vt->cx >= vt->cols) {
+      if (vt->mode.decawm) {
+        int overflow = vt->cols - vt->cx;
+        cursor_sol(vt);
+        cursor_down(vt, 1);
+        cursor_fwd(vt, overflow);
+      } else {
+        vt->cx = vt->cols - 1;
+      }
+    }
+
+    if (vt->cy < 0) {
+      int rows = -vt->cy;
+      for (int i = 0; i < rows; ++i) {
+        scroll_down(vt);
+      }
+
+      vt->cy = 0;
+    } else if (vt->cy >= vt->rows) {
+      int rows = (vt->rows - vt->cy) + 1;
+      for (int i = 0; i < rows; ++i) {
+        scroll_up(vt);
+      }
+
+      vt->cy = vt->rows - 1;
+    }
+  }
 }
 
 static void mark_damage(struct vt *vt, int x, int y, int w, int h) {
@@ -773,9 +799,9 @@ static void scroll_down(struct vt *vt) {
   struct row *prev = NULL;
   struct row *row = get_row(vt, vt->margin_top, &prev);
 
-  append_line(vt, prev);
+  screen_insert_line(vt, prev);
 
-  row = get_row(vt, vt->margin_bottom, &prev);
+  row = get_row(vt, vt->margin_bottom + 1, &prev);
 
   prev->next = row->next;
   free_row(row);
