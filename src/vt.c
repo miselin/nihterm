@@ -19,19 +19,6 @@ struct damage {
   struct damage *next;
 };
 
-struct cellattr {
-  int bold;
-  int underline;
-  int blink;
-  int reverse;
-};
-
-struct cell {
-  char c;
-  struct cellattr attr;
-  struct cell *next;
-};
-
 struct row {
   struct cell *cells;
   struct row *next;
@@ -211,7 +198,7 @@ void vt_render(struct vt *vt) {
       struct cell *cell = row->cells;
       int x = 0;
       while (cell) {
-        char_at(vt->graphics, x++, y, cell->c, 0, 0);
+        char_at(vt->graphics, x++, y, cell);
         cell = cell->next;
       }
     }
@@ -466,19 +453,20 @@ static void handle_bracket_seq(struct vt *vt) {
     }
     break;
   case 'm':
-    if (num_params == 0 || params[0] == 0) {
-      vt->current_attr.bold = 0;
-      vt->current_attr.blink = 0;
-      vt->current_attr.reverse = 0;
-      vt->current_attr.underline = 0;
-    } else if (params[0] == 1) {
-      vt->current_attr.bold = 1;
-    } else if (params[0] == 4) {
-      vt->current_attr.underline = 1;
-    } else if (params[0] == 5) {
-      vt->current_attr.blink = 1;
-    } else if (params[0] == 7) {
-      vt->current_attr.reverse = 1;
+    vt->current_attr.bold = 0;
+    vt->current_attr.blink = 0;
+    vt->current_attr.reverse = 0;
+    vt->current_attr.underline = 0;
+    for (int i = 0; i < num_params; ++i) {
+      if (params[i] == 1) {
+        vt->current_attr.bold = 1;
+      } else if (params[i] == 4) {
+        vt->current_attr.underline = 1;
+      } else if (params[i] == 5) {
+        vt->current_attr.blink = 1;
+      } else if (params[i] == 7) {
+        vt->current_attr.reverse = 1;
+      }
     }
     break;
   case 'P':

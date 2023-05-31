@@ -154,22 +154,18 @@ int process_queue(struct graphics *graphics) {
 
 void link_vt(struct graphics *graphics, struct vt *vt) { graphics->vt = vt; }
 
-void char_at(struct graphics *graphics, int x, int y, char c, int bold,
-             int italic) {
-  char buf[2] = {c, '\0'};
-
+void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
   int font = FONT_REGULAR;
-  if (bold && italic) {
-    font = FONT_BOLD_ITALIC;
-  } else if (bold) {
+  if (cell->attr.bold) {
     font = FONT_BOLD;
-  } else if (italic) {
-    font = FONT_ITALIC;
   }
 
   SDL_Color text_color = {255, 255, 255, 0};
+  SDL_Color back_color = {0, 0, 0, 0};
   SDL_Surface *text =
-      TTF_RenderText_Solid(graphics->font[font], buf, text_color);
+      TTF_RenderGlyph_Shaded(graphics->font[font], (Uint16)cell->c,
+                             cell->attr.reverse ? back_color : text_color,
+                             cell->attr.reverse ? text_color : back_color);
   SDL_Texture *texture = SDL_CreateTextureFromSurface(graphics->renderer, text);
   SDL_FreeSurface(text);
 

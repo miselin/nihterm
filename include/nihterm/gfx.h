@@ -9,6 +9,19 @@ struct graphics;
 // forward-declare VT (circular header dependency)
 struct vt;
 
+struct cellattr {
+  int bold;
+  int underline;
+  int blink;
+  int reverse;
+};
+
+struct cell {
+  char c;
+  struct cellattr attr;
+  struct cell *next;
+};
+
 struct graphics *create_graphics();
 void destroy_graphics(struct graphics *graphics);
 
@@ -22,7 +35,7 @@ int process_queue(struct graphics *graphics);
 
 void link_vt(struct graphics *graphics, struct vt *vt);
 
-void char_at(struct graphics *graphics, int x, int y, char c, int bold, int italic);
+void char_at(struct graphics *graphics, int x, int y, struct cell *cell);
 void graphics_clear(struct graphics *graphics, int x, int y, int w, int h);
 
 #endif  // _NIHTERM_GFX_H
