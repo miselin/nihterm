@@ -74,6 +74,8 @@ struct vt {
   struct cellattr current_attr;
 
   int redraw_all;
+
+  char tabstops[132];
 };
 
 static void set_char_at(struct vt *vt, int x, int y, char c);
@@ -121,6 +123,8 @@ static void delete_character(struct vt *vt);
 static void delete_line(struct vt *vt);
 static void insert_line(struct vt *vt);
 
+static int next_tabstop(struct vt *vt, int x);
+
 static ssize_t write_retry(int fd, const char *buffer, size_t length);
 
 struct vt *vt_create(int pty, int rows, int cols) {
@@ -134,6 +138,10 @@ struct vt *vt_create(int pty, int rows, int cols) {
   struct row *prev = NULL;
   for (int i = 0; i < rows; i++) {
     prev = append_line(vt, prev);
+  }
+  // set default tab stops (every 8 chars)
+  for (int i = 0; i < 132; i++) {
+    vt->tabstops[i] = (i % 8 == 0);
   }
   return vt;
 }
@@ -244,7 +252,7 @@ static void process_char(struct vt *vt, char c) {
       cursor_sol(vt);
       break;
     case '\t':
-      cursor_fwd(vt, 8);
+      vt->cx = next_tabstop(vt, vt->cx);
       break;
     default:
       fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
@@ -285,6 +293,10 @@ static void do_sequence(struct vt *vt) {
     // DECID - Identify Terminal
     // Graphics option + Advanced video option
     write_retry(vt->pty, "\033[?1;6c", 7);
+    break;
+  case 'H':
+    // HTS - Horizontal Tabulation Set
+    vt->tabstops[vt->cx] = 1;
     break;
   default:
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
@@ -397,6 +409,14 @@ static void handle_bracket_seq(struct vt *vt) {
 
   char last = vt->sequence[vt->seqidx - 1];
   switch (last) {
+  case 'g':
+    // TBC - Tabulation Clear
+    if (num_params == 0 || params[0] == 0) {
+      vt->tabstops[vt->cx] = 0;
+    } else if (params[0] == 3) {
+      memset(vt->tabstops, 0, (size_t)vt->cols);
+    }
+    break;
   case 'r':
     fprintf(stderr, "DECSTBM: num=%d %d %d [%s]\n", num_params, params[0],
             params[1], vt->sequence);
@@ -943,4 +963,14 @@ void free_row(struct row *row) {
   }
 
   free(row);
+}
+
+static int next_tabstop(struct vt *vt, int x) {
+  for (int i = x + 1; i < vt->cols; ++i) {
+    if (vt->tabstops[i]) {
+      return i;
+    }
+  }
+
+  return vt->cols - 1;
 }
