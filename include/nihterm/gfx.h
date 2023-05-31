@@ -19,7 +19,6 @@ struct cellattr {
 struct cell {
   char c;
   struct cellattr attr;
-  struct cell *next;
 };
 
 struct graphics *create_graphics();

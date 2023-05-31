@@ -20,7 +20,7 @@ struct damage {
 };
 
 struct row {
-  struct cell *cells;
+  struct cell cells[132];
   struct row *next;
   int dirty;
 };
@@ -36,6 +36,9 @@ struct vt {
 
   int margin_top;
   int margin_bottom;
+
+  int margin_left;
+  int margin_right;
 
   struct row *screen;
 
@@ -70,6 +73,9 @@ struct vt {
     int decpff;
     int decpex;
   } mode;
+
+  // G0/G1
+  int charset;
 
   struct cellattr current_attr;
 
@@ -111,13 +117,11 @@ static void handle_pound_seq(struct vt *vt);
 static void get_params(const char *sequence, int *params, int *num_params);
 
 struct row *get_row(struct vt *vt, int y, struct row **prev);
-struct cell *get_cell(struct row *row, int x, struct cell **prev);
 
 void free_row(struct row *row);
 
 static struct row *append_line(struct vt *vt, struct row *after);
 static struct row *screen_insert_line(struct vt *vt, struct row *prev);
-static void append_cell(struct vt *vt, struct row *row);
 
 static void delete_character(struct vt *vt);
 static void delete_line(struct vt *vt);
@@ -134,6 +138,8 @@ struct vt *vt_create(int pty, int rows, int cols) {
   vt->cols = cols;
   vt->margin_top = 0;
   vt->margin_bottom = rows - 1;
+  vt->margin_left = 0;
+  vt->margin_right = cols;
   vt->screen = NULL;
   struct row *prev = NULL;
   for (int i = 0; i < rows; i++) {
@@ -149,13 +155,6 @@ struct vt *vt_create(int pty, int rows, int cols) {
 void vt_destroy(struct vt *vt) {
   struct row *row = vt->screen;
   while (row) {
-    struct cell *cell = row->cells;
-    while (cell) {
-      struct cell *tmp = cell;
-      cell = cell->next;
-      free(tmp);
-    }
-
     struct row *tmp = row;
     row = row->next;
     free(tmp);
@@ -203,11 +202,8 @@ void vt_render(struct vt *vt) {
 
       graphics_clear(vt->graphics, 0, y, vt->cols, 1);
 
-      struct cell *cell = row->cells;
-      int x = 0;
-      while (cell) {
-        char_at(vt->graphics, x++, y, cell);
-        cell = cell->next;
+      for (int i = 0; i < vt->cols; i++) {
+        char_at(vt->graphics, i, y, &row->cells[i]);
       }
     }
 
@@ -219,7 +215,19 @@ void vt_render(struct vt *vt) {
 }
 
 static void process_char(struct vt *vt, char c) {
+  // VT100 ignores NUL and DEL
+  if (c == 0 || c == '\177') {
+    return;
+  }
+
   if (vt->in_sequence) {
+    if (c == '\030' || c == '\032') {
+      // CAN, SUB - cancel sequence
+      vt->in_sequence = 0;
+      vt->seqidx = 0;
+      return;
+    }
+
     vt->sequence[vt->seqidx++] = c;
 
     if (vt->seqidx == 1 && !isalpha(c) && !iscntrl(c)) {
@@ -246,6 +254,8 @@ static void process_char(struct vt *vt, char c) {
       cursor_back(vt, 1);
       break;
     case '\n':
+    case '\013':
+    case '\014':
       cursor_down(vt, 1);
       break;
     case '\r':
@@ -253,6 +263,12 @@ static void process_char(struct vt *vt, char c) {
       break;
     case '\t':
       vt->cx = next_tabstop(vt, vt->cx);
+      break;
+    case '\016':
+      vt->charset = 1;
+      break;
+    case '\017':
+      vt->charset = 0;
       break;
     default:
       fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
@@ -713,14 +729,8 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
     return;
   }
 
-  struct cell *cell = get_cell(row, x, NULL);
-  if (!cell) {
-    print_error("set_char_at failed to get cell at x=%d y=%d\n", x, y);
-    return;
-  }
-
-  cell->c = c;
-  cell->attr = vt->current_attr;
+  row->cells[x].c = c;
+  row->cells[x].attr = vt->current_attr;
 
   row->dirty = 1;
 }
@@ -728,8 +738,6 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
 static void scroll_up(struct vt *vt) {
   fprintf(stderr, "scroll_up: %d %d [%d..%d]\n", vt->rows, vt->cy,
           vt->margin_top, vt->margin_bottom);
-
-  // int rows = vt->margin_bottom - vt->margin_top;
 
   struct row *prev = NULL;
   struct row *row = get_row(vt, vt->margin_top, &prev);
@@ -778,11 +786,9 @@ static void handle_pound_seq(struct vt *vt) {
     {
       struct row *row = vt->screen;
       while (row) {
-        struct cell *cell = row->cells;
-        while (cell) {
-          cell->c = 'E';
-          cell->attr = vt->current_attr;
-          cell = cell->next;
+        for (int x = 0; x < vt->cols; ++x) {
+          row->cells[x].c = 'E';
+          row->cells[x].attr = vt->current_attr;
         }
 
         row = row->next;
@@ -807,19 +813,6 @@ struct row *get_row(struct vt *vt, int y, struct row **prev) {
   return row;
 }
 
-struct cell *get_cell(struct row *row, int x, struct cell **prev) {
-  struct cell *cell = row->cells;
-  while (cell && x--) {
-    if (prev) {
-      *prev = cell;
-    }
-
-    cell = cell->next;
-  }
-
-  return cell;
-}
-
 static struct row *append_line(struct vt *vt, struct row *after) {
   struct row *row = after;
   if (!after) {
@@ -839,8 +832,9 @@ static struct row *append_line(struct vt *vt, struct row *after) {
 
 static struct row *screen_insert_line(struct vt *vt, struct row *prev) {
   struct row *new_row = calloc(1, sizeof(struct row));
-  for (int i = 0; i < vt->cols; ++i) {
-    append_cell(vt, new_row);
+  for (int x = 0; x < vt->cols; ++x) {
+    new_row->cells[x].c = ' ';
+    new_row->cells[x].attr = vt->current_attr;
   }
 
   if (prev) {
@@ -854,37 +848,15 @@ static struct row *screen_insert_line(struct vt *vt, struct row *prev) {
   return new_row;
 }
 
-static void append_cell(struct vt *vt, struct row *row) {
-  struct cell *new_cell = calloc(1, sizeof(struct cell));
-  new_cell->c = ' ';
-  new_cell->attr = vt->current_attr;
-
-  struct cell *cell = row->cells;
-  if (!cell) {
-    row->cells = new_cell;
-    return;
-  }
-
-  while (cell->next) {
-    cell = cell->next;
-  }
-
-  cell->next = new_cell;
-}
-
 static void delete_character(struct vt *vt) {
-  struct cell *prev = NULL;
   struct row *row = get_row(vt, vt->cy, NULL);
-  struct cell *cell = get_cell(row, vt->cx, &prev);
-  if (!prev) {
-    row->cells = cell->next;
-  } else {
-    prev->next = cell->next;
-  }
 
-  append_cell(vt, row);
+  memmove(&row->cells[vt->cx], &row->cells[vt->cx + 1],
+          sizeof(struct cell) * (size_t)(vt->cols - vt->cx - 1));
 
-  free(cell);
+  // TODO(miselin): I think this actually is meant to be the rightmost attribute
+  row->cells[vt->cols - 1].c = ' ';
+  row->cells[vt->cols - 1].attr = vt->current_attr;
 
   row->dirty = 1;
 }
@@ -924,12 +896,9 @@ void vt_fill(struct vt *vt, char **buffer) {
   struct row *row = vt->screen;
   int y = 0;
   while (row && y < vt->rows) {
-    struct cell *cell = row->cells;
-    int x = 0;
-    while (cell && x < vt->cols) {
-      (*buffer)[(y * (vt->cols + 1)) + x] = cell->c;
-      cell = cell->next;
-      ++x;
+    int x;
+    for (x = 0; x < vt->cols; ++x) {
+      (*buffer)[(y * (vt->cols + 1)) + x] = row->cells[x].c;
     }
 
     (*buffer)[(y * (vt->cols + 1)) + x] = '\n';
@@ -954,16 +923,7 @@ static ssize_t write_retry(int fd, const char *buffer, size_t length) {
   }
 }
 
-void free_row(struct row *row) {
-  struct cell *cell = row->cells;
-  while (cell) {
-    struct cell *tmp = cell;
-    cell = cell->next;
-    free(tmp);
-  }
-
-  free(row);
-}
+void free_row(struct row *row) { free(row); }
 
 static int next_tabstop(struct vt *vt, int x) {
   for (int i = x + 1; i < vt->cols; ++i) {
