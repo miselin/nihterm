@@ -39,9 +39,6 @@ struct teststate {
     cfmakeraw(&t);
     tcsetattr(pty_child, TCSANOW, &t);
 
-    fprintf(stderr, "parent: %d, child: %d, name: %s\n", pty_parent, pty_child,
-            name);
-
     vt = vt_create(pty_parent, 25, 80);
   }
 
@@ -123,6 +120,25 @@ TEST(VTTest, Overwrite) {
   vt_process(state.vt, "EEEEEEEEEEEEE\r", 14);
   vt_process(state.vt, "Hello, world!\n", 14);
 
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+TEST(VTTest, VT100_DECALN) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/alignment.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  vt_process(state.vt, "\033#8", 3);
   vt_render(state.vt);
 
   char *buffer = nullptr;
@@ -257,7 +273,6 @@ TEST(VTTest, VT100_CUP) {
 
   char buf[64] = {0};
 
-  // should reset to 1,1
   vt_process(state.vt, "\033[5;5H", 6);
 
   // ask for a cursor position report
@@ -268,4 +283,178 @@ TEST(VTTest, VT100_CUP) {
 
   EXPECT_GT(rc, 0);
   EXPECT_STREQ(buf, "\033[5;5R");
+}
+
+TEST(VTTest, VT100_CUB) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033[D";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[5;4R");
+}
+
+TEST(VTTest, VT100_CUD) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033[B";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[6;5R");
+}
+
+TEST(VTTest, VT100_CUF) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033[C";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[5;6R");
+}
+
+TEST(VTTest, VT100_CUU) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033[A";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[4;5R");
+}
+
+TEST(VTTest, VT100_NEL) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033E";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[6;1R");
+}
+
+TEST(VTTest, VT100_RI) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033M";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[4;5R");
+}
+
+TEST(VTTest, VT100_IND) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[5;5H\033D";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  // ask for a cursor position report
+  ssize_t rc = cpr(state, buf, 64);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[6;5R");
+}
+
+TEST(VTTest, VT100_ENQ) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033\005";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  ssize_t rc = read_timeout(state.pty_child, buf, 64, 2);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[?1;2c");
+}
+
+TEST(VTTest, VT100_DA) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033[c";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  ssize_t rc = read_timeout(state.pty_child, buf, 64, 2);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[?1;6c");
+}
+
+TEST(VTTest, VT100_DECID) {
+  struct teststate state;
+
+  char buf[64] = {0};
+
+  const char *teststr = "\033Z";
+  vt_process(state.vt, teststr, strlen(teststr));
+
+  ssize_t rc = read_timeout(state.pty_child, buf, 64, 2);
+  if (rc < 0 && errno == ETIMEDOUT) {
+    FAIL() << "Timed out waiting for response";
+  }
+  EXPECT_GT(rc, 0);
+  EXPECT_STREQ(buf, "\033[?1;6c");
 }

@@ -227,11 +227,18 @@ static void process_char(struct vt *vt, char c) {
   if (vt->in_sequence) {
     vt->sequence[vt->seqidx++] = c;
 
-    if (isdigit(c) || c == '[' || c == ';' || c == '?' || c == '#') {
+    if (vt->seqidx == 1 && !isalpha(c) && !iscntrl(c)) {
       return;
-    } else {
-      do_sequence(vt);
     }
+
+    // CSI sequences have more parameters, ESC sequences are complete here.
+    if (vt->sequence[0] == '[') {
+      if (isdigit(c) || c == ';' || c == '?' || c == '#') {
+        return;
+      }
+    }
+
+    do_sequence(vt);
   } else if (c == '\033') {
     vt->in_sequence = 1;
   } else if (isprint(c)) {
@@ -286,6 +293,11 @@ static void do_sequence(struct vt *vt) {
   case 'M':
     // Reverse Index
     cursor_up(vt, 1);
+    break;
+  case 'Z':
+    // DECID - Identify Terminal
+    // Graphics option + Advanced video option
+    write_retry(vt->pty, "\033[?1;6c", 7);
     break;
   default:
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
@@ -422,41 +434,24 @@ static void handle_bracket_seq(struct vt *vt) {
     handle_modes(vt, last == 'l' ? 0 : 1);
     break;
   case 'c':
-  case 'Z':
-    // Identify Terminal
-    // report VT102
-    write_retry(vt->pty, "\033[?6c", 5);
+    // DA - Device Attributes
+    // Graphics option + Advanced video option
+    write_retry(vt->pty, "\033[?1;6c", 7);
     break;
   case 'n':
     handle_reports_seq(vt, params, num_params);
     break;
   case 'A':
-    if (num_params != 1) {
-      print_error("CUU: expected 1 parameter\n");
-    } else {
-      cursor_up(vt, params[0]);
-    }
+    cursor_up(vt, params[0]);
     break;
   case 'B':
-    if (num_params != 1) {
-      print_error("CUD: expected 1 parameter\n");
-    } else {
-      cursor_down(vt, params[0]);
-    }
+    cursor_down(vt, params[0]);
     break;
   case 'C':
-    if (num_params != 1) {
-      print_error("CUF: expected 1 parameter\n");
-    } else {
-      cursor_fwd(vt, params[0]);
-    }
+    cursor_fwd(vt, params[0]);
     break;
   case 'D':
-    if (num_params != 1) {
-      print_error("CUB: expected 1 parameter\n");
-    } else {
-      cursor_back(vt, params[0]);
-    }
+    cursor_back(vt, params[0]);
     break;
   case 'H':
     // fall through
@@ -768,12 +763,21 @@ static void scroll_down(struct vt *vt) {
 }
 
 static void handle_pound_seq(struct vt *vt) {
+  fprintf(stderr, "pound seq: %s\n", vt->sequence);
   switch (vt->sequence[1]) {
   case '8':
     // DECALN
-    for (int y = 0; y < vt->rows; ++y) {
-      for (int x = 0; x < vt->cols; ++x) {
-        set_char_at(vt, x, y, 'E');
+    {
+      struct row *row = vt->screen;
+      while (row) {
+        struct cell *cell = row->cells;
+        while (cell) {
+          cell->c = 'E';
+          cell->attr = vt->current_attr;
+          cell = cell->next;
+        }
+
+        row = row->next;
       }
     }
     break;
