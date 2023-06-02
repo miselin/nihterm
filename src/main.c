@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
     setenv("LC_ALL", "C", 1);
 
     // execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
-    execl("/bin/bash", "/bin/bash", NULL);
+    execl("/bin/bash", "bash", NULL);
 
     fprintf(stderr, "nihterm: exit failed: %s\n", strerror(errno));
     exit(1);

@@ -148,8 +148,6 @@ int process_queue(struct graphics *graphics) {
         break;
       }
       break;
-    default:
-      fprintf(stderr, "unhandled event: %d\n", event.type);
     }
   }
 
