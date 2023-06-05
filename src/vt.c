@@ -114,6 +114,7 @@ static void scroll_down(struct vt *vt);
 
 // sequence handling
 static void handle_bracket_seq(struct vt *vt);
+static void handle_paren_seq(struct vt *vt);
 static void handle_reports_seq(struct vt *vt, int *params, int num_params);
 static void handle_modes(struct vt *vt, int set);
 static void handle_erases(struct vt *vt, int line, int n);
@@ -243,10 +244,52 @@ static void process_char(struct vt *vt, char c) {
     return;
   }
 
+  // these all take action regardless of if we're in a control sequence
+  int actioned = 1;
+  switch (c) {
+  case '\005':
+    // ENQ: Enquiry
+    write_retry(vt->pty, "\033[?1;2c", 7);
+    break;
+  case '\010':
+    cursor_back(vt, 1);
+    break;
+  case '\n':
+  case '\013':
+  case '\014':
+    cursor_down(vt, 1, 1);
+    break;
+  case '\r':
+    cursor_sol(vt);
+    break;
+  case '\t':
+    cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy, 0);
+    break;
+  case '\016':
+    vt->charset = 1;
+    break;
+  case '\017':
+    vt->charset = 0;
+    break;
+  default:
+    // fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
+    actioned = 0;
+  }
+
+  if (actioned) {
+    return;
+  }
+
   if (vt->in_sequence) {
     if (c == '\030' || c == '\032') {
       // CAN, SUB - cancel sequence
       end_sequence(vt);
+      return;
+    }
+
+    if (c == '\033') {
+      // ESC during sequence reests the sequence
+      vt->seqidx = 0;
       return;
     }
 
@@ -257,7 +300,7 @@ static void process_char(struct vt *vt, char c) {
       return;
     }
 
-    if (vt->seqidx == 1 && !isalpha(c) && !iscntrl(c)) {
+    if (vt->seqidx == 1 && !isalpha(c) && !iscntrl(c) && !isdigit(c)) {
       return;
     }
 
@@ -307,20 +350,6 @@ static void process_char(struct vt *vt, char c) {
     case '\017':
       vt->charset = 0;
       break;
-    case '7':
-      // DECSC - Save Cursor
-      vt->saved_x = vt->cx;
-      vt->saved_y = vt->cy;
-      vt->saved_attr = vt->current_attr;
-      vt->saved_charset = vt->charset;
-      break;
-    case '8':
-      // DECRC - Restore Cursor
-      vt->cx = vt->saved_x;
-      vt->cy = vt->saved_y;
-      vt->current_attr = vt->saved_attr;
-      vt->charset = vt->saved_charset;
-      break;
     default:
       fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
     }
@@ -335,6 +364,10 @@ static void do_sequence(struct vt *vt) {
   switch (vt->sequence[0]) {
   case '[':
     handle_bracket_seq(vt);
+    break;
+  case '(':
+  case ')':
+    handle_paren_seq(vt);
     break;
   case '#':
     handle_pound_seq(vt);
@@ -360,6 +393,20 @@ static void do_sequence(struct vt *vt) {
   case 'H':
     // HTS - Horizontal Tabulation Set
     vt->tabstops[vt->cx] = 1;
+    break;
+  case '7':
+    // DECSC - Save Cursor
+    vt->saved_x = vt->cx;
+    vt->saved_y = vt->cy;
+    vt->saved_attr = vt->current_attr;
+    vt->saved_charset = vt->charset;
+    break;
+  case '8':
+    // DECRC - Restore Cursor
+    vt->cx = vt->saved_x;
+    vt->cy = vt->saved_y;
+    vt->current_attr = vt->saved_attr;
+    vt->charset = vt->saved_charset;
     break;
   default:
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
@@ -389,6 +436,21 @@ static void cursor_up(struct vt *vt, int num, int scroll) {
 }
 
 static void cursor_to(struct vt *vt, int x, int y, int scroll) {
+  fprintf(
+      stderr,
+      "cursor_to(%d, %d) current %d, %d (decom %d, decawm %d, margin %d..%d)\n",
+      x, y, vt->cx, vt->cy, vt->mode.decom, vt->mode.decawm, vt->margin_top,
+      vt->margin_bottom);
+
+  // TODO(miselin): this isn't quite right yet...
+  /*
+  if (vt->mode.decom) {
+    // position is relative to origin in DECOM mode
+    x += vt->margin_left;
+    y += vt->margin_top;
+  }
+  */
+
   vt->cx = x;
   vt->cy = y;
 
@@ -397,10 +459,10 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->cx = vt->margin_left;
     } else if (vt->cx >= vt->margin_right) {
       if (vt->mode.decawm) {
-        int overflow = vt->margin_right - vt->cx;
-        cursor_sol(vt);
-        cursor_down(vt, 1, scroll);
-        cursor_fwd(vt, overflow);
+        int overflow = vt->cx - vt->margin_right;
+        vt->cy++;
+        vt->cx = overflow;
+        scroll = 1;
       } else {
         vt->cx = vt->margin_right - 1;
       }
@@ -408,7 +470,7 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
 
     if (vt->cy < vt->margin_top) {
       if (scroll) {
-        int rows = vt->margin_top - vt->cy;
+        int rows = (vt->margin_top - vt->cy) + 1;
         for (int i = 0; i < rows; ++i) {
           scroll_down(vt);
         }
@@ -417,7 +479,7 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->cy = vt->margin_top;
     } else if (vt->cy >= vt->margin_bottom) {
       if (scroll) {
-        int rows = (vt->margin_bottom - vt->cy) + 1;
+        int rows = (vt->cy - vt->margin_bottom) + 1;
         for (int i = 0; i < rows; ++i) {
           scroll_up(vt);
         }
@@ -430,10 +492,10 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->cx = 0;
     } else if (vt->cx >= vt->cols) {
       if (vt->mode.decawm) {
-        int overflow = vt->cols - vt->cx;
-        cursor_sol(vt);
-        cursor_down(vt, 1, scroll);
-        cursor_fwd(vt, overflow);
+        int overflow = vt->cx - vt->cols;
+        vt->cy++;
+        vt->cx = overflow;
+        scroll = 1;
       } else {
         vt->cx = vt->cols - 1;
       }
@@ -450,7 +512,7 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->cy = 0;
     } else if (vt->cy >= vt->rows) {
       if (scroll) {
-        int rows = (vt->rows - vt->cy) + 1;
+        int rows = (vt->cy - vt->rows) + 1;
         for (int i = 0; i < rows; ++i) {
           scroll_up(vt);
         }
@@ -459,6 +521,8 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->cy = vt->rows - 1;
     }
   }
+
+  fprintf(stderr, "cursor_to(%d, %d) => %d, %d\n", x, y, vt->cx, vt->cy);
 }
 
 static void mark_damage(struct vt *vt, int x, int y, int w, int h) {
@@ -686,6 +750,9 @@ static void handle_modes(struct vt *vt, int set) {
     case 6:
       // DECOM (set = Relative, reset = Absolute)
       vt->mode.decom = set;
+
+      // when changing DECOM, the cursor is homed
+      cursor_home(vt);
       break;
     case 7:
       // DECAWM (set = Wrap, reset = No Wrap)
@@ -1124,4 +1191,28 @@ static void end_sequence(struct vt *vt) {
   vt->in_sequence = 0;
   vt->seqidx = 0;
   memset(vt->sequence, 0, sizeof(vt->sequence));
+}
+
+static void handle_paren_seq(struct vt *vt) {
+  if (vt->seqidx < 2) {
+    return;
+  }
+
+  switch (vt->sequence[1]) {
+  case 'A':
+    // UK
+    break;
+  case 'B':
+    // ASCII
+    break;
+  case '0':
+    // special graphics
+    break;
+  case '1':
+    // alternate standard characters
+    break;
+  case '2':
+    // alternate special graphics
+    break;
+  }
 }
