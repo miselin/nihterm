@@ -92,9 +92,9 @@ static void insert_char_at(struct vt *vt, int x, int y, char c);
 static void cursor_fwd(struct vt *vt, int count);
 static void cursor_back(struct vt *vt, int count);
 static void cursor_home(struct vt *vt);
-static void cursor_down(struct vt *vt, int count);
-static void cursor_up(struct vt *vt, int count);
-static void cursor_to(struct vt *vt, int x, int y);
+static void cursor_down(struct vt *vt, int count, int scroll);
+static void cursor_up(struct vt *vt, int count, int scroll);
+static void cursor_to(struct vt *vt, int x, int y, int scroll);
 static void cursor_sol(struct vt *vt);
 
 static void process_char(struct vt *vt, char c);
@@ -293,13 +293,13 @@ static void process_char(struct vt *vt, char c) {
     case '\n':
     case '\013':
     case '\014':
-      cursor_down(vt, 1);
+      cursor_down(vt, 1, 1);
       break;
     case '\r':
       cursor_sol(vt);
       break;
     case '\t':
-      cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy);
+      cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy, 0);
       break;
     case '\016':
       vt->charset = 1;
@@ -341,16 +341,16 @@ static void do_sequence(struct vt *vt) {
     break;
   case 'E':
     // NEL: Next Line
-    cursor_down(vt, 1);
+    cursor_down(vt, 1, 1);
     cursor_sol(vt);
     break;
   case 'D':
     // Index
-    cursor_down(vt, 1);
+    cursor_down(vt, 1, 1);
     break;
   case 'M':
     // Reverse Index
-    cursor_up(vt, 1);
+    cursor_up(vt, 1, 1);
     break;
   case 'Z':
     // DECID - Identify Terminal
@@ -369,26 +369,26 @@ static void do_sequence(struct vt *vt) {
 }
 
 static void cursor_fwd(struct vt *vt, int num) {
-  cursor_to(vt, vt->cx + num, vt->cy);
+  cursor_to(vt, vt->cx + num, vt->cy, 0);
 }
 
 static void cursor_back(struct vt *vt, int num) {
-  cursor_to(vt, vt->cx - num, vt->cy);
+  cursor_to(vt, vt->cx - num, vt->cy, 0);
 }
 
-static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy); }
+static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy, 0); }
 
-static void cursor_home(struct vt *vt) { cursor_to(vt, 0, 0); }
+static void cursor_home(struct vt *vt) { cursor_to(vt, 0, 0, 0); }
 
-static void cursor_down(struct vt *vt, int num) {
-  cursor_to(vt, vt->cx, vt->cy + num);
+static void cursor_down(struct vt *vt, int num, int scroll) {
+  cursor_to(vt, vt->cx, vt->cy + num, scroll);
 }
 
-static void cursor_up(struct vt *vt, int num) {
-  cursor_to(vt, vt->cx, vt->cy - num);
+static void cursor_up(struct vt *vt, int num, int scroll) {
+  cursor_to(vt, vt->cx, vt->cy - num, scroll);
 }
 
-static void cursor_to(struct vt *vt, int x, int y) {
+static void cursor_to(struct vt *vt, int x, int y, int scroll) {
   vt->cx = x;
   vt->cy = y;
 
@@ -399,7 +399,7 @@ static void cursor_to(struct vt *vt, int x, int y) {
       if (vt->mode.decawm) {
         int overflow = vt->margin_right - vt->cx;
         cursor_sol(vt);
-        cursor_down(vt, 1);
+        cursor_down(vt, 1, scroll);
         cursor_fwd(vt, overflow);
       } else {
         vt->cx = vt->margin_right - 1;
@@ -407,16 +407,20 @@ static void cursor_to(struct vt *vt, int x, int y) {
     }
 
     if (vt->cy < vt->margin_top) {
-      int rows = vt->margin_top - vt->cy;
-      for (int i = 0; i < rows; ++i) {
-        scroll_down(vt);
+      if (scroll) {
+        int rows = vt->margin_top - vt->cy;
+        for (int i = 0; i < rows; ++i) {
+          scroll_down(vt);
+        }
       }
 
       vt->cy = vt->margin_top;
     } else if (vt->cy >= vt->margin_bottom) {
-      int rows = (vt->margin_bottom - vt->cy) + 1;
-      for (int i = 0; i < rows; ++i) {
-        scroll_up(vt);
+      if (scroll) {
+        int rows = (vt->margin_bottom - vt->cy) + 1;
+        for (int i = 0; i < rows; ++i) {
+          scroll_up(vt);
+        }
       }
 
       vt->cy = vt->margin_bottom - 1;
@@ -428,7 +432,7 @@ static void cursor_to(struct vt *vt, int x, int y) {
       if (vt->mode.decawm) {
         int overflow = vt->cols - vt->cx;
         cursor_sol(vt);
-        cursor_down(vt, 1);
+        cursor_down(vt, 1, scroll);
         cursor_fwd(vt, overflow);
       } else {
         vt->cx = vt->cols - 1;
@@ -436,16 +440,20 @@ static void cursor_to(struct vt *vt, int x, int y) {
     }
 
     if (vt->cy < 0) {
-      int rows = -vt->cy;
-      for (int i = 0; i < rows; ++i) {
-        scroll_down(vt);
+      if (scroll) {
+        int rows = -vt->cy;
+        for (int i = 0; i < rows; ++i) {
+          scroll_down(vt);
+        }
       }
 
       vt->cy = 0;
     } else if (vt->cy >= vt->rows) {
-      int rows = (vt->rows - vt->cy) + 1;
-      for (int i = 0; i < rows; ++i) {
-        scroll_up(vt);
+      if (scroll) {
+        int rows = (vt->rows - vt->cy) + 1;
+        for (int i = 0; i < rows; ++i) {
+          scroll_up(vt);
+        }
       }
 
       vt->cy = vt->rows - 1;
@@ -541,10 +549,10 @@ static void handle_bracket_seq(struct vt *vt) {
     handle_reports_seq(vt, params, num_params);
     break;
   case 'A':
-    cursor_up(vt, params[0]);
+    cursor_up(vt, params[0], 0);
     break;
   case 'B':
-    cursor_down(vt, params[0]);
+    cursor_down(vt, params[0], 0);
     break;
   case 'C':
     cursor_fwd(vt, params[0]);
@@ -561,7 +569,7 @@ static void handle_bracket_seq(struct vt *vt) {
     } else {
       // CUP/HVP: position
       // line ; column, default value is 1
-      cursor_to(vt, params[1] - 1, params[0] - 1);
+      cursor_to(vt, params[1] - 1, params[0] - 1, 0);
     }
     break;
   case 'm':
@@ -1052,10 +1060,10 @@ static void do_vt52(struct vt *vt) {
 
   switch (vt->sequence[0]) {
   case 'A':
-    cursor_up(vt, 1);
+    cursor_up(vt, 1, 0);
     break;
   case 'B':
-    cursor_down(vt, 1);
+    cursor_down(vt, 1, 0);
     break;
   case 'C':
     cursor_fwd(vt, 1);
@@ -1073,7 +1081,7 @@ static void do_vt52(struct vt *vt) {
     cursor_home(vt);
     break;
   case 'I':
-    cursor_up(vt, 1);
+    cursor_up(vt, 1, 1);
     break;
   case 'J':
     erase_screen_cursor(vt, 0);
@@ -1089,7 +1097,7 @@ static void do_vt52(struct vt *vt) {
 
     char l = vt->sequence[1];
     char c = vt->sequence[2];
-    cursor_to(vt, c - 037 - 1, l - 037 - 1);
+    cursor_to(vt, c - 037 - 1, l - 037 - 1, 0);
     break;
   case 'Z':
     // Identify
