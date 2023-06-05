@@ -68,9 +68,10 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "nihterm: fork failed: %s", strerror(errno));
     return EXIT_FAILURE;
   } else if (child == 0) {
-    close(0);
-    close(1);
-    close(2);
+    for (int i = 0; i < 1024; ++i) {
+      close(i);
+    }
+
     close(pty);
 
     setsid();
@@ -90,8 +91,8 @@ int main(int argc, char *argv[]) {
     // setenv("LC_ALL", "en_US.UTF-8", 1);
     setenv("LC_ALL", "C", 1);
 
-    // execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
-    execl("/bin/bash", "bash", NULL);
+    execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
+    // execl("/bin/bash", "bash", NULL);
 
     fprintf(stderr, "nihterm: exit failed: %s\n", strerror(errno));
     exit(1);

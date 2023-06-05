@@ -1,5 +1,7 @@
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -85,9 +87,24 @@ static ssize_t read_timeout(int fd, char *buf, size_t buflen, time_t seconds) {
   }
 }
 
+static void vt_printf(struct teststate &state, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  char buffer[1024];
+  memset(buffer, 0, 1024);
+  int len = vsprintf(buffer, fmt, ap);
+  vt_process(state.vt, buffer, static_cast<size_t>(len));
+  va_end(ap);
+}
+
 static ssize_t cpr(struct teststate &state, char *buf, size_t buflen) {
   vt_process(state.vt, "\033[6n", 4);
   return read_timeout(state.pty_child, buf, buflen, 2);
+}
+
+// cup but for 1-based coordinates
+static void cup1(struct teststate &state, int a, int b) {
+  vt_printf(state, "\033[%d;%dH", a, b);
 }
 
 TEST(VTTest, BasicOutput) {
@@ -688,4 +705,98 @@ TEST(VTTest, VT100_DECID) {
   }
   EXPECT_GT(rc, 0);
   EXPECT_STREQ(buf, "\033[?1;6c");
+}
+
+TEST(VTTest, AutoWrap) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/vttest_autowrap.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  // Autowrap test from vttest
+
+  static char on_left[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  static char on_right[] = "abcdefghijklmnopqrstuvwxyz";
+  int width = 80;
+  int height = sizeof(on_left) - 1;
+  int region = 24 - 6;
+
+  // 80-column mode
+  vt_printf(state, "\033[?3l");
+
+  vt_printf(state,
+            "Test of autowrap, mixing control and print characters.\r\n");
+  vt_printf(state, "The left/right margins should have letters in order:\r\n");
+
+  // DECSTBM
+  vt_printf(state, "\033[%d;%dr", 3, region + 3);
+
+  // DECOM
+  vt_printf(state, "\033[?6h");
+
+  for (int i = 0; i < height; ++i) {
+    switch (i % 4) {
+    case 0:
+      // as-is
+      cup1(state, region + 1, 1);
+      vt_printf(state, "%c", on_left[i]);
+
+      cup1(state, region + 1, width);
+      vt_printf(state, "%c", on_right[i]);
+
+      vt_printf(state, "\n");
+      break;
+    case 1:
+      // simple wrap
+      cup1(state, region, width);
+      vt_printf(state, "%c%c", on_right[i - 1], on_left[i]);
+
+      // backspace at right margin
+      cup1(state, region + 1, width);
+      vt_printf(state, "%c\b %c", on_left[i], on_right[i]);
+
+      vt_printf(state, "\n");
+      break;
+    case 2:
+      // tab to right margin
+      cup1(state, region + 1, width);
+      vt_printf(state, "%c\b\b\t\t%c", on_left[i], on_right[i]);
+
+      cup1(state, region + 1, 2);
+      vt_printf(state, "\b%c\n", on_left[i]);
+      break;
+    default:
+      // newline at right margin
+      cup1(state, region + 1, width);
+      vt_printf(state, "\n");
+
+      cup1(state, region, 1);
+      vt_printf(state, "%c", on_left[i]);
+
+      cup1(state, region, width);
+      vt_printf(state, "%c", on_right[i]);
+      break;
+    }
+  }
+
+  // Unset DECOM
+  vt_printf(state, "\033[?6l");
+
+  // Unset DECSTBM
+  vt_printf(state, "\033[r");
+
+  // holdit()
+  cup1(state, 22, 1);
+  vt_printf(state, "Push <RETURN>");
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
 }
