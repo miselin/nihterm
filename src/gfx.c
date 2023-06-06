@@ -6,6 +6,8 @@
 #include <nihterm/gfx.h>
 #include <nihterm/vt.h>
 
+#include <cairo/cairo.h>
+
 #define FONT_REGULAR 0
 #define FONT_BOLD 1
 #define FONT_ITALIC 2
@@ -27,6 +29,9 @@ struct graphics {
   struct vt *vt;
 
   int dirty;
+
+  SDL_Surface *sdlsurf;
+  cairo_surface_t *cairosurf;
 };
 
 struct graphics *create_graphics() {

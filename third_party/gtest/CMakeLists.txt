@@ -1,4 +1,4 @@
-project(third_party C CXX)
+project(third_party_gtest C CXX)
 
 # GoogleTest requires at least C++14
 set(CMAKE_CXX_STANDARD 14)

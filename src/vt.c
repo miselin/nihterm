@@ -1374,7 +1374,6 @@ void set_cp(struct vt *vt, struct cell *cell, char c) {
     cell->cp_len = 3;
     break;
   case 0x6e:
-    // HORIZONTAL
     cell->cp[0] = '\xe2';
     cell->cp[1] = '\x94';
     cell->cp[2] = '\xbc';
