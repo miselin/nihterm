@@ -731,8 +731,8 @@ TEST(VTTest, AutoWrap) {
   // DECSTBM
   vt_printf(state, "\033[%d;%dr", 3, region + 3);
 
-  // DECOM
-  vt_printf(state, "\033[?6h");
+  // DECOM, DECAWM
+  vt_printf(state, "\033[?6h\033[?7h");
 
   for (int i = 0; i < height; ++i) {
     switch (i % 4) {

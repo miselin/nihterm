@@ -241,8 +241,10 @@ void vt_render(struct vt *vt) {
 }
 
 static void process_char(struct vt *vt, char c) {
+  /*
   fprintf(stderr, "process: '%c' / %d\n",
           c == '\033' ? '~' : (isprint(c) ? c : '-'), c);
+  */
 
   // VT100 ignores NUL and DEL
   if (c == 0 || c == '\177') {
@@ -326,7 +328,6 @@ static void process_char(struct vt *vt, char c) {
   } else if (isprint(c)) {
     // handle wrapping now that we have a printable
     if (vt->mode.decawm && vt->lcf) {
-      fprintf(stderr, "rightmost column ack lcf %d\n", vt->lcf);
       // move to first column of next line, scrolling if needed
       cursor_sol(vt);
       cursor_down(vt, 1, 1);
@@ -347,7 +348,6 @@ static void process_char(struct vt *vt, char c) {
       // we don't advance the cursor past the right-most column until the _next_
       // printable
       if ((vt->cx + 1) == vt->margin_right) {
-        fprintf(stderr, "rightmost column set lcf %d\n", vt->lcf);
         vt->lcf = 1;
       } else {
         cursor_fwd(vt, 1, 0);
@@ -459,7 +459,9 @@ static void cursor_back(struct vt *vt, int num) {
 
 static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy, 0); }
 
-static void cursor_home(struct vt *vt) { cursor_to(vt, 0, 0, 0); }
+static void cursor_home(struct vt *vt) {
+  cursor_to(vt, vt->margin_left, vt->margin_top, 0);
+}
 
 static void cursor_down(struct vt *vt, int num, int scroll) {
   cursor_to(vt, vt->cx, vt->cy + num, scroll);
@@ -470,17 +472,13 @@ static void cursor_up(struct vt *vt, int num, int scroll) {
 }
 
 static void cursor_to(struct vt *vt, int x, int y, int scroll) {
+  /*
   fprintf(
       stderr,
       "cursor_to(%d, %d) current %d, %d (decom %d, decawm %d, margin %d..%d)\n",
       x, y, vt->cx, vt->cy, vt->mode.decom, vt->mode.decawm, vt->margin_top,
       vt->margin_bottom);
-
-  if (vt->mode.decom) {
-    // position is relative to origin in DECOM mode
-    x += vt->margin_left;
-    y += vt->margin_top;
-  }
+  */
 
   vt->cx = x;
   vt->cy = y;
@@ -488,7 +486,6 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
   if (vt->cx < vt->margin_left) {
     vt->cx = vt->margin_left;
   } else if (vt->cx >= vt->margin_right) {
-    // TODO: DECAWM?
     vt->cx = vt->margin_right - 1;
   }
 
@@ -504,8 +501,6 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
   } else if (vt->cy > vt->margin_bottom) {
     if (scroll) {
       int rows = vt->cy - vt->margin_bottom;
-      fprintf(stderr, "%d > %d => %d rows of scroll\n", vt->cy,
-              vt->margin_bottom, rows);
       for (int i = 0; i < rows; ++i) {
         scroll_up(vt);
       }
@@ -514,7 +509,7 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
     vt->cy = vt->margin_bottom;
   }
 
-  fprintf(stderr, "cursor_to(%d, %d) => %d, %d\n", x, y, vt->cx, vt->cy);
+  // fprintf(stderr, "cursor_to(%d, %d) => %d, %d\n", x, y, vt->cx, vt->cy);
 }
 
 static void mark_damage(struct vt *vt, int x, int y, int w, int h) {
@@ -586,14 +581,11 @@ static void handle_bracket_seq(struct vt *vt) {
     }
 
     if (vt->margin_top > vt->margin_bottom) {
-      fprintf(stderr, "!!! margin top exceeds margin bottom\n");
       vt->margin_top = 0;
       vt->margin_bottom = vt->rows - 1;
     } else if (vt->margin_top < 0) {
-      fprintf(stderr, "!!! margin top is negative\n");
       vt->margin_top = 0;
     } else if (vt->margin_bottom >= vt->rows) {
-      fprintf(stderr, "!!! margin bottom is beyond the screen\n");
       vt->margin_bottom = vt->rows - 1;
     }
 
@@ -649,7 +641,9 @@ static void handle_bracket_seq(struct vt *vt) {
     } else {
       // CUP/HVP: position
       // line ; column, default value is 1
-      cursor_to(vt, params[1] - 1, params[0] - 1, 0);
+      // in DECOM mode the line number is relative to the top margin
+      cursor_to(vt, vt->margin_left + (params[1] - 1),
+                vt->margin_top + (params[0] - 1), 0);
     }
     vt->lcf = 0;
     break;
@@ -715,19 +709,17 @@ static void handle_reports_seq(struct vt *vt, int *params, int num_params) {
       // report OK
       write_retry(vt->pty, "\033[0n", 4);
       break;
-    case 6:
+    case 6: {
       // Device Status Report (cursor position)
-      fprintf(stderr, "writing CPR\n");
       char buf[32];
       int n = sprintf(buf, "\033[%d;%dR", vt->cy + 1, vt->cx + 1);
-      fprintf(stderr, "write CPR: <esc>%s\n", buf + 1);
       if (n < 0) {
         print_error("failed to sprintf cursor position report: %s\n",
                     strerror(errno));
       } else if (write_retry(vt->pty, buf, (size_t)n) <= 0) {
         print_error("failed to write cursor position: %s\n", strerror(errno));
       }
-      break;
+    } break;
     }
   }
 }
@@ -964,6 +956,7 @@ static void scroll_up(struct vt *vt) {
 
   struct row *prev = NULL;
   struct row *row = get_row(vt, vt->margin_top, &prev);
+  struct row *bottom_row = get_row(vt, vt->margin_bottom, NULL);
 
   if (prev) {
     prev->next = row->next;
@@ -971,7 +964,7 @@ static void scroll_up(struct vt *vt) {
     vt->screen = row->next;
   }
 
-  append_line(vt, NULL);
+  screen_insert_line(vt, bottom_row);
 
   free_row(row);
 
@@ -984,17 +977,14 @@ static void scroll_down(struct vt *vt) {
   fprintf(stderr, "scroll_down: %d %d [%d..%d]\n", vt->rows, vt->cy,
           vt->margin_top, vt->margin_bottom);
 
-  // int rows = vt->margin_bottom - vt->margin_top;
-
-  struct row *prev = NULL;
-  struct row *row = get_row(vt, vt->margin_top, &prev);
+  struct row *prev = NULL, *last_prev = NULL;
+  get_row(vt, vt->margin_top, &prev);
+  struct row *last_row = get_row(vt, vt->margin_bottom, &last_prev);
 
   screen_insert_line(vt, prev);
 
-  row = get_row(vt, vt->margin_bottom + 1, &prev);
-
-  prev->next = row->next;
-  free_row(row);
+  last_prev->next = last_row->next;
+  free_row(last_row);
 
   vt->redraw_all = 1;
 
