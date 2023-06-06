@@ -167,6 +167,16 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
     font = FONT_BOLD;
   }
 
+  int attrs = TTF_STYLE_NORMAL;
+  if (cell->attr.bold) {
+    attrs |= TTF_STYLE_BOLD;
+  }
+  if (cell->attr.underline) {
+    attrs |= TTF_STYLE_UNDERLINE;
+  }
+
+  TTF_SetFontStyle(graphics->font[font], attrs);
+
   SDL_Color text_color = {255, 255, 255, 0};
   SDL_Color back_color = {0, 0, 0, 0};
   SDL_Surface *text =

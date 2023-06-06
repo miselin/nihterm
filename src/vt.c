@@ -266,6 +266,9 @@ static void process_char(struct vt *vt, char c) {
   case '\013':
   case '\014':
     cursor_down(vt, 1, 1);
+    if (vt->mode.lnm) {
+      cursor_sol(vt);
+    }
     vt->lcf = 0;
     break;
   case '\r':
@@ -480,6 +483,10 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
       vt->margin_bottom);
   */
 
+  if (vt->cx == x && vt->cy == y) {
+    return;
+  }
+
   vt->cx = x;
   vt->cy = y;
 
@@ -617,19 +624,19 @@ static void handle_bracket_seq(struct vt *vt) {
     handle_reports_seq(vt, params, num_params);
     break;
   case 'A':
-    cursor_up(vt, params[0], 0);
+    cursor_up(vt, params[0] ? params[0] : 1, 0);
     vt->lcf = 0;
     break;
   case 'B':
-    cursor_down(vt, params[0], 0);
+    cursor_down(vt, params[0] ? params[0] : 1, 0);
     vt->lcf = 0;
     break;
   case 'C':
-    cursor_fwd(vt, params[0], 0);
+    cursor_fwd(vt, params[0] ? params[0] : 1, 0);
     vt->lcf = 0;
     break;
   case 'D':
-    cursor_back(vt, params[0]);
+    cursor_back(vt, params[0] ? params[0] : 1);
     vt->lcf = 0;
     break;
   case 'H':
@@ -886,11 +893,13 @@ static void erase_screen(struct vt *vt) {
 }
 
 static void erase_line_cursor(struct vt *vt, int before) {
-  fprintf(stderr, "erase_line_cursor: before=%d cx=%d\n", before, vt->cx);
+  fprintf(stderr, "erase_line_cursor: before=%d cx=%d cy=%d\n", before, vt->cx,
+          vt->cy);
   int sx = before ? 0 : vt->cx;
-  int ex = before ? vt->cx : vt->cols;
+  int ex = before ? vt->cx + 1 : vt->cols;
   fprintf(stderr, "erase_line_cursor: %d %d\n", sx, ex);
   for (int x = sx; x < ex; ++x) {
+    fprintf(stderr, "erase %d %d\n", x, vt->cy);
     set_char_at(vt, x, vt->cy, ' ');
   }
 
@@ -905,6 +914,10 @@ static void erase_screen_cursor(struct vt *vt, int before) {
     for (int x = 0; x < vt->cols; ++x) {
       set_char_at(vt, x, y, ' ');
     }
+  }
+
+  if (before) {
+    erase_line_cursor(vt, 1);
   }
 
   mark_damage(vt, 0, sy, vt->cols, ey - sy);

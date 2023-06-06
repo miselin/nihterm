@@ -9,8 +9,8 @@ Perfect score = 100 points.  Extra credit at end.
 
 1. Test of cursor movements
 
-[ ]   1. Text inside frame of E's inside frame of *'s and +'s, 80 columns
-[ ]   2. Text inside frame of E's inside frame of *'s and +'s, 132 columns
+[x]   1. Text inside frame of E's inside frame of *'s and +'s, 80 columns
+[x]   2. Text inside frame of E's inside frame of *'s and +'s, 132 columns
 [x]   3. Cursor-control chars inside ESC sequences
 [x]   4. Leading 0's in ESC sequences
 
@@ -31,7 +31,7 @@ Perfect score = 100 points.  Extra credit at end.
      Graphic Rendition test pattern, dark background
 
 [x]  16. Normal ("vanilla")
-[ ]  17. Normal underlined distinct from normal
+[x]  17. Normal underlined distinct from normal
 [ ]  18. Normal blink distinct from all above
 [ ]  19. Normal underline blink distinct from all above
 [x]  20. Normal reverse ("negative") distinct from all above

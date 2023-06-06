@@ -103,9 +103,45 @@ static ssize_t cpr(struct teststate &state, char *buf, size_t buflen) {
 }
 
 // cup but for 1-based coordinates
-static void cup1(struct teststate &state, int a, int b) {
+static void cup(struct teststate &state, int a, int b) {
   vt_printf(state, "\033[%d;%dH", a, b);
 }
+
+static void cub(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dD", n);
+}
+
+static void cuf(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dC", n);
+}
+
+static void cuu(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dA", n);
+}
+
+static void cud(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dB", n);
+}
+
+static void decaln(struct teststate &state) { vt_printf(state, "\033#8"); }
+
+static void ed(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dJ", n);
+}
+
+static void el(struct teststate &state, int n) {
+  vt_printf(state, "\033[%dK", n);
+}
+
+static void hvp(struct teststate &state, int a, int b) {
+  vt_printf(state, "\033[%d;%df", a, b);
+}
+
+static void ind(struct teststate &state) { vt_printf(state, "\033D"); }
+
+static void ri(struct teststate &state) { vt_printf(state, "\033M"); }
+
+static void nel(struct teststate &state) { vt_printf(state, "\033E"); }
 
 TEST(VTTest, BasicOutput) {
   struct teststate state;
@@ -738,42 +774,42 @@ TEST(VTTest, AutoWrap) {
     switch (i % 4) {
     case 0:
       // as-is
-      cup1(state, region + 1, 1);
+      cup(state, region + 1, 1);
       vt_printf(state, "%c", on_left[i]);
 
-      cup1(state, region + 1, width);
+      cup(state, region + 1, width);
       vt_printf(state, "%c", on_right[i]);
 
       vt_printf(state, "\n");
       break;
     case 1:
       // simple wrap
-      cup1(state, region, width);
+      cup(state, region, width);
       vt_printf(state, "%c%c", on_right[i - 1], on_left[i]);
 
       // backspace at right margin
-      cup1(state, region + 1, width);
+      cup(state, region + 1, width);
       vt_printf(state, "%c\b %c", on_left[i], on_right[i]);
 
       vt_printf(state, "\n");
       break;
     case 2:
       // tab to right margin
-      cup1(state, region + 1, width);
+      cup(state, region + 1, width);
       vt_printf(state, "%c\b\b\t\t%c", on_left[i], on_right[i]);
 
-      cup1(state, region + 1, 2);
+      cup(state, region + 1, 2);
       vt_printf(state, "\b%c\n", on_left[i]);
       break;
     default:
       // newline at right margin
-      cup1(state, region + 1, width);
+      cup(state, region + 1, width);
       vt_printf(state, "\n");
 
-      cup1(state, region, 1);
+      cup(state, region, 1);
       vt_printf(state, "%c", on_left[i]);
 
-      cup1(state, region, width);
+      cup(state, region, width);
       vt_printf(state, "%c", on_right[i]);
       break;
     }
@@ -786,7 +822,133 @@ TEST(VTTest, AutoWrap) {
   vt_printf(state, "\033[r");
 
   // holdit()
-  cup1(state, 22, 1);
+  cup(state, 22, 1);
+  vt_printf(state, "Push <RETURN>");
+
+  vt_render(state.vt);
+
+  char *buffer = nullptr;
+  vt_fill(state.vt, &buffer);
+
+  EXPECT_NE(buffer, nullptr);
+  EXPECT_STREQ(buffer, testdata);
+
+  free(buffer);
+  delete[] testdata;
+}
+
+// vttest's cursor movements test
+TEST(VTTest, CursorMovementsBox) {
+  struct teststate state;
+
+  const char *testdata = read_testdata("test/testdata/vttest_cursormoves.dat");
+  EXPECT_NE(testdata, nullptr);
+
+  // test assumes DECAWM
+  vt_printf(state, "\033[?7h");
+
+  /* Compute left/right columns for a 60-column box centered in 'width' */
+  int width = 80;
+  int max_lines = 24;
+  int inner_l = (80 - 60) / 2;
+  int inner_r = 61 + inner_l;
+  int hlfxtra = (80 - 80) / 2;
+  int row = 0;
+  int col = 0;
+
+  decaln(state);
+  cup(state, 9, inner_l);
+  ed(state, 1);
+  cup(state, 18, 60 + hlfxtra);
+  ed(state, 0);
+  el(state, 1);
+  cup(state, 9, inner_r);
+  el(state, 0);
+  for (row = 10; row <= 16; row++) {
+    cup(state, row, inner_l);
+    el(state, 1);
+    cup(state, row, inner_r);
+    el(state, 0);
+  }
+  cup(state, 17, 30);
+  el(state, 2);
+  for (col = 1; col <= width; col++) {
+    hvp(state, max_lines, col);
+    vt_printf(state, "*");
+    hvp(state, 1, col);
+    vt_printf(state, "*");
+  }
+  cup(state, 2, 2);
+  for (row = 2; row <= max_lines - 1; row++) {
+    vt_printf(state, "+");
+    cub(state, 1);
+    ind(state);
+  }
+  cup(state, max_lines - 1, width - 1);
+  for (row = max_lines - 1; row >= 2; row--) {
+    vt_printf(state, "+");
+    cub(state, 1);
+    ri(state);
+  }
+  cup(state, 2, 1);
+  for (row = 2; row <= max_lines - 1; row++) {
+    vt_printf(state, "*");
+    cup(state, row, width);
+    vt_printf(state, "*");
+    cub(state, 10);
+    if (row < 10)
+      nel(state);
+    else
+      vt_printf(state,
+                "\r\n"); // XXX: vttest runs in canonical mode, we don't
+                         // have a line discipline. this would be an NL->CRNL
+  }
+  cup(state, 2, 10);
+  cub(state, 42 + hlfxtra);
+  cuf(state, 2);
+  for (col = 3; col <= width - 2; col++) {
+    vt_printf(state, "+");
+    cuf(state, 0);
+    cub(state, 2);
+    cuf(state, 1);
+  }
+  cup(state, max_lines - 1, inner_r - 1);
+  cuf(state, 42 + hlfxtra);
+  cub(state, 2);
+  for (col = width - 2; col >= 3; col--) {
+    vt_printf(state, "+");
+    cub(state, 1);
+    cuf(state, 1);
+    cub(state, 0);
+    vt_printf(state, "%c", 8);
+  }
+  cup(state, 1, 1);
+  cuu(state, 10);
+  cuu(state, 1);
+  cuu(state, 0);
+  cup(state, max_lines, width);
+  cud(state, 10);
+  cud(state, 1);
+  cud(state, 0);
+
+  cup(state, 10, 2 + inner_l);
+  for (row = 10; row <= 15; row++) {
+    for (col = 2 + inner_l; col <= inner_r - 2; col++)
+      vt_printf(state, " ");
+    cud(state, 1);
+    cub(state, 58);
+  }
+  cuu(state, 5);
+  cuf(state, 1);
+  vt_printf(state, "The screen should be cleared,  and have an unbroken bor-");
+  cup(state, 12, inner_l + 3);
+  vt_printf(state, "der of *'s and +'s around the edge,   and exactly in the");
+  cup(state, 13, inner_l + 3);
+  vt_printf(state, "middle  there should be a frame of E's around this  text");
+  cup(state, 14, inner_l + 3);
+  vt_printf(state, "with  one (1) free position around it.    ");
+
+  // holdit()
   vt_printf(state, "Push <RETURN>");
 
   vt_render(state.vt);
