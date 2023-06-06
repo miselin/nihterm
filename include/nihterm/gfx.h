@@ -17,7 +17,8 @@ struct cellattr {
 };
 
 struct cell {
-  char c;
+  char cp[5];
+  int cp_len;
   struct cellattr attr;
 };
 

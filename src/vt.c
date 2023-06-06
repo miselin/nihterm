@@ -141,6 +141,8 @@ static int next_tabstop(struct vt *vt, int x);
 
 static ssize_t write_retry(int fd, const char *buffer, size_t length);
 
+static void set_cp(struct vt *vt, struct cell *cell, char c);
+
 struct vt *vt_create(int pty, int rows, int cols) {
   struct vt *vt = (struct vt *)calloc(sizeof(struct vt), 1);
   vt->pty = pty;
@@ -935,7 +937,7 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
     return;
   }
 
-  row->cells[x].c = c;
+  set_cp(vt, &row->cells[x], c);
   row->cells[x].attr = vt->current_attr;
 
   row->dirty = 1;
@@ -957,7 +959,7 @@ static void insert_char_at(struct vt *vt, int x, int y, char c) {
   memmove(&row->cells[x + 1], &row->cells[x],
           sizeof(struct cell) * (size_t)(vt->cols - x - 1));
 
-  row->cells[x].c = c;
+  set_cp(vt, &row->cells[x], c);
   row->cells[x].attr = vt->current_attr;
 
   row->dirty = 1;
@@ -1013,7 +1015,7 @@ static void handle_pound_seq(struct vt *vt) {
       struct row *row = vt->screen;
       while (row) {
         for (int x = 0; x < vt->cols; ++x) {
-          row->cells[x].c = 'E';
+          set_cp(vt, &row->cells[x], 'E');
           row->cells[x].attr = vt->current_attr;
         }
 
@@ -1059,7 +1061,7 @@ static struct row *append_line(struct vt *vt, struct row *after) {
 static struct row *screen_insert_line(struct vt *vt, struct row *prev) {
   struct row *new_row = calloc(1, sizeof(struct row));
   for (int x = 0; x < vt->cols; ++x) {
-    new_row->cells[x].c = ' ';
+    set_cp(vt, &new_row->cells[x], ' ');
     new_row->cells[x].attr = vt->current_attr;
   }
 
@@ -1081,7 +1083,7 @@ static void delete_character(struct vt *vt) {
           sizeof(struct cell) * (size_t)(vt->cols - vt->cx - 1));
 
   // TODO(miselin): I think this actually is meant to be the rightmost attribute
-  row->cells[vt->cols - 1].c = ' ';
+  set_cp(vt, &row->cells[vt->cols - 1], ' ');
   row->cells[vt->cols - 1].attr = vt->current_attr;
 
   row->dirty = 1;
@@ -1124,7 +1126,8 @@ void vt_fill(struct vt *vt, char **buffer) {
   while (row && y < vt->rows) {
     int x;
     for (x = 0; x < vt->cols; ++x) {
-      (*buffer)[(y * (vt->cols + 1)) + x] = row->cells[x].c;
+      (*buffer)[(y * (vt->cols + 1)) + x] =
+          row->cells[x].cp[0]; // TODO: breaks for real utf-8 chars
     }
 
     (*buffer)[(y * (vt->cols + 1)) + x] = '\n';
@@ -1183,9 +1186,11 @@ static void do_vt52(struct vt *vt) {
     break;
   case 'F':
     // Select Special Graphics character set
+    vt->charset = 1;
     break;
   case 'G':
     // Select ASCII character set
+    vt->charset = 0;
     break;
   case 'H':
     cursor_home(vt);
@@ -1244,18 +1249,239 @@ static void handle_paren_seq(struct vt *vt) {
   switch (vt->sequence[1]) {
   case 'A':
     // UK
+    // TODO
+    vt->charset = 0;
     break;
   case 'B':
     // ASCII
+    vt->charset = 0;
     break;
   case '0':
     // special graphics
+    vt->charset = 1;
     break;
   case '1':
     // alternate standard characters
+    // TODO
+    vt->charset = 0;
     break;
   case '2':
     // alternate special graphics
+    // TODO
+    vt->charset = 1;
     break;
   }
+}
+
+void set_cp(struct vt *vt, struct cell *cell, char c) {
+  memset(cell->cp, 0, 5);
+
+  // standard charset
+  if (vt->charset == 0) {
+    cell->cp[0] = c;
+    cell->cp[1] = 0;
+    cell->cp_len = 1;
+    return;
+  }
+
+  // graphics charset
+  int set = 1;
+  switch (c) {
+  case 0x5f:
+    set = 0;
+    c = ' ';
+    break;
+  case 0x60:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x97';
+    cell->cp[2] = '\x86';
+    cell->cp_len = 3;
+    break;
+  case 0x61:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x96';
+    cell->cp[2] = '\x92';
+    cell->cp_len = 3;
+    break;
+  case 0x62:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\x89';
+    cell->cp_len = 3;
+    break;
+  case 0x63:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\x8c';
+    cell->cp_len = 3;
+    break;
+  case 0x64:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\x8d';
+    cell->cp_len = 3;
+    break;
+  case 0x65:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\x8a';
+    cell->cp_len = 3;
+    break;
+  case 0x66:
+    cell->cp[0] = '\xc2';
+    cell->cp[1] = '\xb0';
+    cell->cp_len = 2;
+    break;
+  case 0x67:
+    cell->cp[0] = '\xc2';
+    cell->cp[1] = '\xb1';
+    cell->cp_len = 2;
+    break;
+  case 0x68:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\xa4';
+    cell->cp_len = 3;
+    break;
+  case 0x69:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x90';
+    cell->cp[2] = '\x8b';
+    cell->cp_len = 3;
+    break;
+  case 0x6a:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x98';
+    cell->cp_len = 3;
+    break;
+  case 0x6b:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x90';
+    cell->cp_len = 3;
+    break;
+  case 0x6c:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x8c';
+    cell->cp_len = 3;
+    break;
+  case 0x6d:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x94';
+    cell->cp_len = 3;
+    break;
+  case 0x6e:
+    // HORIZONTAL
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\xbc';
+    cell->cp_len = 3;
+    break;
+  case 0x6f:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x8e';
+    cell->cp[2] = '\xba';
+    cell->cp_len = 3;
+    break;
+  case 0x70:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x8e';
+    cell->cp[2] = '\xbb';
+    cell->cp_len = 3;
+    break;
+  case 0x71:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x80';
+    cell->cp_len = 3;
+    break;
+  case 0x72:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x8e';
+    cell->cp[2] = '\xbc';
+    cell->cp_len = 3;
+    break;
+  case 0x73:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x8e';
+    cell->cp[2] = '\xbd';
+    cell->cp_len = 3;
+    break;
+  case 0x74:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x9c';
+    cell->cp_len = 3;
+    break;
+  case 0x75:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\xa4';
+    cell->cp_len = 3;
+    break;
+  case 0x76:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\xb4';
+    cell->cp_len = 3;
+    break;
+  case 0x77:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\xac';
+    cell->cp_len = 3;
+    break;
+  case 0x78:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x94';
+    cell->cp[2] = '\x82';
+    cell->cp_len = 3;
+    break;
+  case 0x79:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x89';
+    cell->cp[2] = '\xa4';
+    cell->cp_len = 3;
+    break;
+  case 0x7a:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x89';
+    cell->cp[2] = '\xa5';
+    cell->cp_len = 3;
+    break;
+  case 0x7b:
+    cell->cp[0] = '\xcf';
+    cell->cp[1] = '\x80';
+    cell->cp_len = 2;
+    break;
+  case 0x7c:
+    cell->cp[0] = '\xe2';
+    cell->cp[1] = '\x89';
+    cell->cp[2] = '\xa0';
+    cell->cp_len = 3;
+    break;
+  case 0x7d:
+    cell->cp[0] = '\xc2';
+    cell->cp[1] = '\xa3';
+    cell->cp_len = 2;
+    break;
+  case 0x7e:
+    cell->cp[0] = '\xc2';
+    cell->cp[1] = '\xb7';
+    cell->cp_len = 2;
+    break;
+  default:
+    set = 0;
+    ;
+  }
+
+  if (!set) {
+    cell->cp[0] = c;
+    cell->cp_len = 1;
+  }
+
+  cell->cp[cell->cp_len] = '\0';
 }
