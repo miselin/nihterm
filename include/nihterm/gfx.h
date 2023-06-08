@@ -40,4 +40,7 @@ void graphics_clear(struct graphics *graphics, int x, int y, int w, int h);
 
 void graphics_resize(struct graphics *graphics, int cols, int rows);
 
+// Invert the colors of the terminal.
+void graphics_invert(struct graphics *graphics, int invert);
+
 #endif  // _NIHTERM_GFX_H

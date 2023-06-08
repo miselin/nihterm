@@ -776,6 +776,13 @@ static void handle_modes(struct vt *vt, int set) {
     case 5:
       // DECSCNM (set = Reverse, reset = Normal)
       vt->mode.decscnm = set;
+
+      if (vt->graphics) {
+        graphics_invert(vt->graphics, set);
+      }
+
+      // full redraw, entire screen changed
+      vt->redraw_all = 1;
       break;
     case 6:
       // DECOM (set = Relative, reset = Absolute)

@@ -1,12 +1,12 @@
 #include <stdint.h>
 
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
 
 #include <nihterm/gfx.h>
 #include <nihterm/vt.h>
 
 #include <cairo/cairo.h>
+#include <pango/pangocairo.h>
 
 #define FONT_REGULAR 0
 #define FONT_BOLD 1
@@ -18,7 +18,7 @@ static int load_fonts(struct graphics *graphics);
 struct graphics {
   SDL_Window *window;
   SDL_Renderer *renderer;
-  TTF_Font *font[4];
+  PangoFontDescription *font[4];
 
   size_t xdim;
   size_t ydim;
@@ -30,13 +30,11 @@ struct graphics {
 
   int dirty;
 
-  SDL_Surface *sdlsurf;
-  cairo_surface_t *cairosurf;
+  int inverted;
 };
 
 struct graphics *create_graphics() {
   SDL_Init(SDL_INIT_VIDEO);
-  TTF_Init();
 
   struct graphics *graphics =
       (struct graphics *)calloc(sizeof(struct graphics), 1);
@@ -47,10 +45,21 @@ struct graphics *create_graphics() {
     return NULL;
   }
 
-  int cellw = 0, cellh = 0;
-  TTF_SizeUTF8(graphics->font[FONT_REGULAR], "X", &cellw, &cellh);
-  graphics->cellw = (size_t)cellw;
-  graphics->cellh = (size_t)cellh;
+  PangoFontMetrics *metrics = 0;
+  PangoFontMap *fontmap = pango_cairo_font_map_get_default();
+  PangoContext *context = pango_font_map_create_context(fontmap);
+  pango_context_set_font_description(context, graphics->font[FONT_REGULAR]);
+  metrics =
+      pango_context_get_metrics(context, graphics->font[FONT_REGULAR], NULL);
+  g_object_unref(context);
+
+  graphics->cellw =
+      pango_font_metrics_get_approximate_char_width(metrics) / PANGO_SCALE;
+  graphics->cellh = (pango_font_metrics_get_ascent(metrics) +
+                     pango_font_metrics_get_descent(metrics)) /
+                    PANGO_SCALE;
+
+  pango_font_metrics_unref(metrics);
 
   graphics->xdim = graphics->cellw * 80;
   graphics->ydim = graphics->cellh * 25;
@@ -77,33 +86,13 @@ static int load_fonts(struct graphics *graphics) {
     return 0;
   }
 
-  TTF_Font *font = TTF_OpenFont("fonts/CourierPrime-Regular.ttf", 12);
-  if (!font) {
+  PangoFontDescription *font_desc =
+      pango_font_description_from_string("Courier Prime 12");
+  if (!font_desc) {
     return 1;
   }
 
-  graphics->font[FONT_REGULAR] = font;
-
-  font = TTF_OpenFont("fonts/CourierPrime-Bold.ttf", 12);
-  if (!font) {
-    return 1;
-  }
-
-  graphics->font[FONT_BOLD] = font;
-
-  font = TTF_OpenFont("fonts/CourierPrime-Italic.ttf", 12);
-  if (!font) {
-    return 1;
-  }
-
-  graphics->font[FONT_ITALIC] = font;
-
-  font = TTF_OpenFont("fonts/CourierPrime-BoldItalic.ttf", 12);
-  if (!font) {
-    return 1;
-  }
-
-  graphics->font[FONT_BOLD_ITALIC] = font;
+  graphics->font[FONT_REGULAR] = font_desc;
 
   return 0;
 }
@@ -167,29 +156,59 @@ int process_queue(struct graphics *graphics) {
 void link_vt(struct graphics *graphics, struct vt *vt) { graphics->vt = vt; }
 
 void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
-  int font = FONT_REGULAR;
+  PangoAttrList *attrs = pango_attr_list_new();
   if (cell->attr.bold) {
-    font = FONT_BOLD;
-  }
-
-  int attrs = TTF_STYLE_NORMAL;
-  if (cell->attr.bold) {
-    attrs |= TTF_STYLE_BOLD;
+    PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+    pango_attr_list_insert(attrs, attr);
   }
   if (cell->attr.underline) {
-    attrs |= TTF_STYLE_UNDERLINE;
+    PangoAttribute *attr = pango_attr_underline_new(PANGO_UNDERLINE_SINGLE);
+    pango_attr_list_insert(attrs, attr);
   }
 
-  TTF_SetFontStyle(graphics->font[font], attrs);
+  SDL_Texture *texture = SDL_CreateTexture(
+      graphics->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      graphics->cellw, graphics->cellh);
 
-  SDL_Color text_color = {255, 255, 255, 0};
-  SDL_Color back_color = {0, 0, 0, 0};
-  SDL_Surface *text =
-      TTF_RenderUTF8_Shaded(graphics->font[font], cell->cp,
-                            cell->attr.reverse ? back_color : text_color,
-                            cell->attr.reverse ? text_color : back_color);
-  SDL_Texture *texture = SDL_CreateTextureFromSurface(graphics->renderer, text);
-  SDL_FreeSurface(text);
+  void *pixels;
+  int pitch;
+  SDL_LockTexture(texture, NULL, &pixels, &pitch);
+
+  cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
+      pixels, CAIRO_FORMAT_ARGB32, graphics->cellw, graphics->cellh, pitch);
+
+  cairo_t *cr = cairo_create(cairo_surface);
+
+  PangoLayout *layout = pango_cairo_create_layout(cr);
+
+  pango_layout_set_attributes(layout, attrs);
+  pango_layout_set_font_description(layout, graphics->font[FONT_REGULAR]);
+  pango_layout_set_text(layout, cell->cp, cell->cp_len);
+  pango_attr_list_unref(attrs);
+
+  cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+  if (cell->attr.reverse ^ graphics->inverted) {
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+  } else {
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+  }
+
+  cairo_rectangle(cr, 0, 0, graphics->cellw, graphics->cellh);
+  cairo_fill(cr);
+
+  cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+  if (cell->attr.reverse ^ graphics->inverted) {
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+  } else {
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+  }
+
+  pango_cairo_show_layout(cr, layout);
+  g_object_unref(layout);
+
+  cairo_destroy(cr);
+
+  SDL_UnlockTexture(texture);
 
   SDL_Rect target = {(int)(x * (int)graphics->cellw),
                      (int)(y * (int)graphics->cellh), (int)(graphics->cellw),
@@ -207,7 +226,11 @@ void graphics_clear(struct graphics *graphics, int x, int y, int w, int h) {
                      (int)(w * (int)graphics->cellw),
                      (int)(h * (int)graphics->cellh)};
 
-  SDL_SetRenderDrawColor(graphics->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  if (graphics->inverted) {
+    SDL_SetRenderDrawColor(graphics->renderer, 1, 1, 1, SDL_ALPHA_OPAQUE);
+  } else {
+    SDL_SetRenderDrawColor(graphics->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+  }
   SDL_RenderFillRect(graphics->renderer, &target);
 }
 
@@ -222,4 +245,9 @@ void graphics_resize(struct graphics *graphics, int cols, int rows) {
   graphics->ydim = new_ydim;
 
   SDL_SetWindowSize(graphics->window, (int)new_xdim, (int)new_ydim);
+}
+
+void graphics_invert(struct graphics *graphics, int invert) {
+  graphics->inverted = invert;
+  graphics->dirty = 1;
 }

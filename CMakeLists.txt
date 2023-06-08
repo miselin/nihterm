@@ -19,7 +19,7 @@ include_directories(${SDL2_INCLUDE_DIRS})
 find_package(SDL2_TTF REQUIRED)
 include_directories(${SDL2_TTF_INCLUDE_DIRS})
 
-find_package(GTK2 2.6 COMPONENTS cairo pango pangocairo)
+find_package(GTK2 2.6 REQUIRED gtk)
 
 add_subdirectory(src)
 
