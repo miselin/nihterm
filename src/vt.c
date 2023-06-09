@@ -23,6 +23,10 @@ struct row {
   struct cell cells[132];
   struct row *next;
   int dirty;
+
+  int dbl_height;
+  int dbl_side; // 0=top, 1=bottom
+  int dbl_width;
 };
 
 struct vt {
@@ -1000,6 +1004,32 @@ static void scroll_down(struct vt *vt) {
 static void handle_pound_seq(struct vt *vt) {
   fprintf(stderr, "pound seq: %s\n", vt->sequence);
   switch (vt->sequence[1]) {
+  case '3': {
+    // DECDHL - double height, top half
+    struct row *row = get_row(vt, vt->cy, NULL);
+    row->dbl_height = 1;
+    row->dbl_side = 0;
+    row->dbl_width = 0;
+  } break;
+  case '4': {
+    // DECDHL - double height, bottom half
+    struct row *row = get_row(vt, vt->cy, NULL);
+    row->dbl_height = 1;
+    row->dbl_side = 1;
+    row->dbl_width = 0;
+  } break;
+  case '5': {
+    // DECSWL - single width, single height
+    struct row *row = get_row(vt, vt->cy, NULL);
+    row->dbl_height = 0;
+    row->dbl_width = 0;
+  } break;
+  case '6': {
+    // DECDWL - double width
+    struct row *row = get_row(vt, vt->cy, NULL);
+    row->dbl_width = 1;
+    row->dbl_height = 0;
+  } break;
   case '8':
     // DECALN
     {
