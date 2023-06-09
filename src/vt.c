@@ -100,12 +100,14 @@ struct vt {
 static void set_char_at(struct vt *vt, int x, int y, char c);
 static void insert_char_at(struct vt *vt, int x, int y, char c);
 
+static int row_cols(struct vt *vt, struct row *row);
+
 static void cursor_fwd(struct vt *vt, int count, int scroll);
 static void cursor_back(struct vt *vt, int count);
 static void cursor_home(struct vt *vt);
 static void cursor_down(struct vt *vt, int count, int scroll);
 static void cursor_up(struct vt *vt, int count, int scroll);
-static void cursor_to(struct vt *vt, int x, int y, int scroll);
+static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup);
 static void cursor_sol(struct vt *vt);
 
 static void process_char(struct vt *vt, char c);
@@ -212,9 +214,10 @@ void vt_render(struct vt *vt) {
 
       for (int y = damage->y; y < (damage->y + damage->h); ++y) {
         struct row *row = get_row(vt, y, NULL);
-        for (int x = damage->x; x < (damage->x + damage->w) && x < vt->cols;
-             ++x) {
-          char_at(vt->graphics, x, y, &row->cells[x]);
+        for (int x = damage->x;
+             x < (damage->x + damage->w) && x < row_cols(vt, row); ++x) {
+          char_at(vt->graphics, x, y, &row->cells[x], row->dbl_width,
+                  row->dbl_height ? row->dbl_side + 1 : 0);
         }
       }
     }
@@ -237,8 +240,9 @@ void vt_render(struct vt *vt) {
   struct row *row = vt->screen;
   int y = 0;
   while (row) {
-    for (int i = 0; i < vt->cols; i++) {
-      char_at(vt->graphics, i, y, &row->cells[i]);
+    for (int i = 0; i < row_cols(vt, row); i++) {
+      char_at(vt->graphics, i, y, &row->cells[i], row->dbl_width,
+              row->dbl_height ? row->dbl_side + 1 : 0);
     }
 
     row->dirty = 0;
@@ -285,7 +289,7 @@ static void process_char(struct vt *vt, char c) {
     vt->lcf = 0;
     break;
   case '\t':
-    cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy, 0);
+    cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy, 0, 0);
     vt->lcf = 0;
     break;
   case '\016':
@@ -405,6 +409,7 @@ static void do_sequence(struct vt *vt) {
     break;
   case 'M':
     // Reverse Index
+    fprintf(stderr, "reverse index: y=%d top=%d\n", vt->cy, vt->margin_top);
     cursor_up(vt, 1, 1);
     vt->lcf = 0;
     break;
@@ -441,28 +446,28 @@ static void do_sequence(struct vt *vt) {
 }
 
 static void cursor_fwd(struct vt *vt, int num, int scroll) {
-  cursor_to(vt, vt->cx + num, vt->cy, scroll);
+  cursor_to(vt, vt->cx + num, vt->cy, scroll, 0);
 }
 
 static void cursor_back(struct vt *vt, int num) {
-  cursor_to(vt, vt->cx - num, vt->cy, 0);
+  cursor_to(vt, vt->cx - num, vt->cy, 0, 0);
 }
 
-static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy, 0); }
+static void cursor_sol(struct vt *vt) { cursor_to(vt, 0, vt->cy, 0, 0); }
 
 static void cursor_home(struct vt *vt) {
-  cursor_to(vt, vt->margin_left, vt->margin_top, 0);
+  cursor_to(vt, vt->margin_left, vt->margin_top, 0, 0);
 }
 
 static void cursor_down(struct vt *vt, int num, int scroll) {
-  cursor_to(vt, vt->cx, vt->cy + num, scroll);
+  cursor_to(vt, vt->cx, vt->cy + num, scroll, 0);
 }
 
 static void cursor_up(struct vt *vt, int num, int scroll) {
-  cursor_to(vt, vt->cx, vt->cy - num, scroll);
+  cursor_to(vt, vt->cx, vt->cy - num, scroll, 0);
 }
 
-static void cursor_to(struct vt *vt, int x, int y, int scroll) {
+static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup) {
   /*
   fprintf(
       stderr,
@@ -478,10 +483,13 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll) {
   vt->cx = x;
   vt->cy = y;
 
-  if (vt->cx < vt->margin_left) {
-    vt->cx = vt->margin_left;
-  } else if (vt->cx >= vt->margin_right) {
-    vt->cx = vt->margin_right - 1;
+  // CUP can move the cursor out of the scrolling region
+  if (vt->mode.decom || !cup) {
+    if (vt->cx < vt->margin_left) {
+      vt->cx = vt->margin_left;
+    } else if (vt->cx >= vt->margin_right) {
+      vt->cx = vt->margin_right - 1;
+    }
   }
 
   if (vt->cy < vt->margin_top) {
@@ -637,8 +645,24 @@ static void handle_bracket_seq(struct vt *vt) {
       // CUP/HVP: position
       // line ; column, default value is 1
       // in DECOM mode the line number is relative to the top margin
-      cursor_to(vt, vt->margin_left + (params[1] - 1),
-                vt->margin_top + (params[0] - 1), 0);
+
+      int left_addend = 0;
+      int top_addend = 0;
+
+      // H = CUP, f = HVP
+      // Only CUP can move cursor out of scrolling region
+      int cup = last == 'H' ? 1 : 0;
+
+      if (vt->mode.decom) {
+        // Origin mode
+        left_addend = vt->margin_left;
+        top_addend = vt->margin_top;
+      } else {
+        // Absolute mode
+      }
+
+      cursor_to(vt, left_addend + (params[1] - 1), top_addend + (params[0] - 1),
+                0, cup);
     }
     vt->lcf = 0;
     break;
@@ -872,7 +896,9 @@ static void handle_erases(struct vt *vt, int line, int n) {
 }
 
 static void erase_line(struct vt *vt) {
-  for (int x = 0; x < vt->cols; ++x) {
+  struct row *row = get_row(vt, vt->cy, NULL);
+
+  for (int x = 0; x < row_cols(vt, row); ++x) {
     set_char_at(vt, x, vt->cy, ' ');
   }
 
@@ -881,7 +907,11 @@ static void erase_line(struct vt *vt) {
 
 static void erase_screen(struct vt *vt) {
   for (int y = 0; y < vt->rows; ++y) {
-    for (int x = 0; x < vt->cols; ++x) {
+    struct row *row = get_row(vt, y, NULL);
+    row->dbl_width = 0;
+    row->dbl_height = 0;
+
+    for (int x = 0; x < row_cols(vt, row); ++x) {
       set_char_at(vt, x, y, ' ');
     }
   }
@@ -892,8 +922,11 @@ static void erase_screen(struct vt *vt) {
 static void erase_line_cursor(struct vt *vt, int before) {
   fprintf(stderr, "erase_line_cursor: before=%d cx=%d cy=%d\n", before, vt->cx,
           vt->cy);
+
+  struct row *row = get_row(vt, vt->cy, NULL);
+
   int sx = before ? 0 : vt->cx;
-  int ex = before ? vt->cx + 1 : vt->cols;
+  int ex = before ? vt->cx + 1 : row_cols(vt, row);
   fprintf(stderr, "erase_line_cursor: %d %d\n", sx, ex);
   for (int x = sx; x < ex; ++x) {
     fprintf(stderr, "erase %d %d\n", x, vt->cy);
@@ -908,7 +941,11 @@ static void erase_screen_cursor(struct vt *vt, int before) {
   int ey = before ? vt->cy : vt->rows;
 
   for (int y = sy; y < ey; ++y) {
-    for (int x = 0; x < vt->cols; ++x) {
+    struct row *row = get_row(vt, y, NULL);
+    row->dbl_width = 0;
+    row->dbl_height = 0;
+
+    for (int x = 0; x < row_cols(vt, row); ++x) {
       set_char_at(vt, x, y, ' ');
     }
   }
@@ -921,14 +958,19 @@ static void erase_screen_cursor(struct vt *vt, int before) {
 }
 
 static void set_char_at(struct vt *vt, int x, int y, char c) {
-  if (x >= vt->cols || y >= vt->rows) {
-    print_error("set_char_at out of bounds (%d, %d)\n", x, y);
+  if (y >= vt->rows) {
+    print_error("set_char_at out of bounds (y %d)\n", y);
     return;
   }
 
   struct row *row = get_row(vt, y, NULL);
   if (!row) {
     print_error("set_char_at failed to get row %d\n", y);
+    return;
+  }
+
+  if (x >= row_cols(vt, row)) {
+    print_error("set_char_at out of bounds (x %d)\n", x);
     return;
   }
 
@@ -1003,6 +1045,7 @@ static void scroll_down(struct vt *vt) {
 
 static void handle_pound_seq(struct vt *vt) {
   fprintf(stderr, "pound seq: %s\n", vt->sequence);
+  int became_doublewidth = 0;
   switch (vt->sequence[1]) {
   case '3': {
     // DECDHL - double height, top half
@@ -1010,6 +1053,8 @@ static void handle_pound_seq(struct vt *vt) {
     row->dbl_height = 1;
     row->dbl_side = 0;
     row->dbl_width = 0;
+
+    became_doublewidth = 1;
   } break;
   case '4': {
     // DECDHL - double height, bottom half
@@ -1017,6 +1062,8 @@ static void handle_pound_seq(struct vt *vt) {
     row->dbl_height = 1;
     row->dbl_side = 1;
     row->dbl_width = 0;
+
+    became_doublewidth = 1;
   } break;
   case '5': {
     // DECSWL - single width, single height
@@ -1029,13 +1076,15 @@ static void handle_pound_seq(struct vt *vt) {
     struct row *row = get_row(vt, vt->cy, NULL);
     row->dbl_width = 1;
     row->dbl_height = 0;
+
+    became_doublewidth = 1;
   } break;
   case '8':
     // DECALN
     {
       struct row *row = vt->screen;
       while (row) {
-        for (int x = 0; x < vt->cols; ++x) {
+        for (int x = 0; x < row_cols(vt, row); ++x) {
           set_cp(vt, &row->cells[x], 'E');
           row->cells[x].attr = vt->current_attr;
         }
@@ -1046,6 +1095,14 @@ static void handle_pound_seq(struct vt *vt) {
     break;
   default:
     print_error("unknown pound sequence: %s\n", vt->sequence);
+  }
+
+  if (became_doublewidth) {
+    // if moving to double-width would place the cursor beyond the right margin,
+    // it's moved back to the right margin.
+    if (vt->cx >= vt->margin_right) {
+      vt->cx = vt->margin_right - 1;
+    }
   }
 }
 
@@ -1203,13 +1260,16 @@ static ssize_t write_retry(int fd, const char *buffer, size_t length) {
 void free_row(struct row *row) { free(row); }
 
 static int next_tabstop(struct vt *vt, int x) {
-  for (int i = x + 1; i < vt->cols; ++i) {
+  struct row *row = get_row(vt, vt->cy, NULL);
+
+  int width = row_cols(vt, row);
+  for (int i = x + 1; i < width; ++i) {
     if (vt->tabstops[i]) {
       return i;
     }
   }
 
-  return vt->cols - 1;
+  return width - 1;
 }
 
 static void do_vt52(struct vt *vt) {
@@ -1260,7 +1320,7 @@ static void do_vt52(struct vt *vt) {
 
     char l = vt->sequence[1];
     char c = vt->sequence[2];
-    cursor_to(vt, c - 037 - 1, l - 037 - 1, 0);
+    cursor_to(vt, c - 037 - 1, l - 037 - 1, 0, 0);
     break;
   case 'Z':
     // Identify
@@ -1582,4 +1642,8 @@ void set_cp(struct vt *vt, struct cell *cell, char c) {
   }
 
   cell->cp[cell->cp_len] = '\0';
+}
+
+static int row_cols(struct vt *vt, struct row *row) {
+  return (row->dbl_width || row->dbl_height) ? vt->cols / 2 : vt->cols;
 }

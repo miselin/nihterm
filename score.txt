@@ -83,26 +83,26 @@ Perfect score = 100 points.  Extra credit at end.
 
      Test 1 in 80-column mode:
 
-[ ]  55. Left margin correct
-[ ]  56. Width correct
+[x]  55. Left margin correct
+[x]  56. Width correct
 
      Test 2 in 80-column mode:
 
-[ ]  57. Left margin correct
-[ ]  58. Width correct
+[x]  57. Left margin correct
+[x]  58. Width correct
 
      Test 1 in 132-column mode:
 
-[ ]  59. Left margin correct
-[ ]  60. Width correct
+[x]  59. Left margin correct
+[x]  60. Width correct
 
      Test 2 in 132-column mode:
 
-[ ]  61. Left margin correct
-[ ]  62. Width correct
+[x]  61. Left margin correct
+[x]  62. Width correct
 
-[ ]  63. "The man programmer strikes again" test pattern
-[ ]  64. "Exactly half the box should remain"
+[x]  63. "The man programmer strikes again" test pattern
+[x]  64. "Exactly half the box should remain"
 
 5. Test of keyboard
 

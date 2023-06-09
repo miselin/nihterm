@@ -35,7 +35,13 @@ int process_queue(struct graphics *graphics);
 
 void link_vt(struct graphics *graphics, struct vt *vt);
 
-void char_at(struct graphics *graphics, int x, int y, struct cell *cell);
+// Draw the given character at the given position. If dblwide is 1, the
+// character will stretch over two cells. If dblheight is non-zero, the
+// character will be double-width and double-height. Setting dblheight to 1 or
+// 2 will control which half of the double-height character is rendered (1 for
+// top, 2 for bottom).
+void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
+             int dblwide, int dblheight);
 void graphics_clear(struct graphics *graphics, int x, int y, int w, int h);
 
 void graphics_resize(struct graphics *graphics, int cols, int rows);

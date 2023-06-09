@@ -9,9 +9,7 @@
 #include <pango/pangocairo.h>
 
 #define FONT_REGULAR 0
-#define FONT_BOLD 1
-#define FONT_ITALIC 2
-#define FONT_BOLD_ITALIC 3
+#define FONT_DOUBLE 1
 
 static int load_fonts(struct graphics *graphics);
 
@@ -94,6 +92,13 @@ static int load_fonts(struct graphics *graphics) {
 
   graphics->font[FONT_REGULAR] = font_desc;
 
+  font_desc = pango_font_description_from_string("Courier Prime 24");
+  if (!font_desc) {
+    return 1;
+  }
+
+  graphics->font[FONT_DOUBLE] = font_desc;
+
   return 0;
 }
 
@@ -101,6 +106,9 @@ void destroy_graphics(struct graphics *graphics) {
   SDL_DestroyRenderer(graphics->renderer);
   SDL_DestroyWindow(graphics->window);
   SDL_Quit();
+
+  g_object_unref(graphics->font[FONT_REGULAR]);
+  g_object_unref(graphics->font[FONT_DOUBLE]);
 
   free(graphics);
 }
@@ -155,7 +163,10 @@ int process_queue(struct graphics *graphics) {
 
 void link_vt(struct graphics *graphics, struct vt *vt) { graphics->vt = vt; }
 
-void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
+void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
+             int dblwide, int dblheight) {
+  int font_type = FONT_REGULAR;
+
   PangoAttrList *attrs = pango_attr_list_new();
   if (cell->attr.bold) {
     PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
@@ -166,23 +177,51 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
     pango_attr_list_insert(attrs, attr);
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      graphics->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      graphics->cellw, graphics->cellh);
+  int cellw = graphics->cellw;
+  int cellh = graphics->cellh;
+
+  int srcw = cellw;
+  int srch = cellh;
+
+  if (dblheight) {
+    srch *= 2;
+    srcw *= 2;
+
+    // destination is widened and heightened
+    cellw *= 2;
+    cellh *= 2;
+
+    font_type = FONT_DOUBLE;
+  } else if (dblwide) {
+    // destination is only widened
+    cellw *= 2;
+
+    // double-wide source
+    srch *= 2;
+    srcw *= 2;
+
+    // we use the double font but it'll get scaled down to half vertical size
+    // this should look better than the small font scaled _up_ though
+    font_type = FONT_DOUBLE;
+  }
+
+  SDL_Texture *texture =
+      SDL_CreateTexture(graphics->renderer, SDL_PIXELFORMAT_ARGB8888,
+                        SDL_TEXTUREACCESS_STREAMING, srcw, srch);
 
   void *pixels;
   int pitch;
   SDL_LockTexture(texture, NULL, &pixels, &pitch);
 
   cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
-      pixels, CAIRO_FORMAT_ARGB32, graphics->cellw, graphics->cellh, pitch);
+      pixels, CAIRO_FORMAT_ARGB32, srcw, srch, pitch);
 
   cairo_t *cr = cairo_create(cairo_surface);
 
   PangoLayout *layout = pango_cairo_create_layout(cr);
 
   pango_layout_set_attributes(layout, attrs);
-  pango_layout_set_font_description(layout, graphics->font[FONT_REGULAR]);
+  pango_layout_set_font_description(layout, graphics->font[font_type]);
   pango_layout_set_text(layout, cell->cp, cell->cp_len);
   pango_attr_list_unref(attrs);
 
@@ -193,7 +232,7 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
   }
 
-  cairo_rectangle(cr, 0, 0, graphics->cellw, graphics->cellh);
+  cairo_rectangle(cr, 0, 0, cellw, cellh);
   cairo_fill(cr);
 
   cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
@@ -210,11 +249,13 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell) {
 
   SDL_UnlockTexture(texture);
 
-  SDL_Rect target = {(int)(x * (int)graphics->cellw),
-                     (int)(y * (int)graphics->cellh), (int)(graphics->cellw),
-                     (int)(graphics->cellh)};
+  SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), cellw,
+                     graphics->cellh};
 
-  SDL_RenderCopy(graphics->renderer, texture, NULL, &target);
+  SDL_Rect source = {0, dblheight == 2 ? graphics->cellh : 0, cellw,
+                     dblwide ? srch : graphics->cellh};
+
+  SDL_RenderCopy(graphics->renderer, texture, &source, &target);
   SDL_DestroyTexture(texture);
 
   graphics->dirty = 1;
