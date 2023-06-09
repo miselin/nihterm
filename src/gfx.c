@@ -6,6 +6,7 @@
 #include <nihterm/vt.h>
 
 #include <cairo/cairo.h>
+#include <fontconfig/fontconfig.h>
 #include <pango/pangocairo.h>
 
 #define FONT_REGULAR 0
@@ -107,8 +108,12 @@ void destroy_graphics(struct graphics *graphics) {
   SDL_DestroyWindow(graphics->window);
   SDL_Quit();
 
-  g_object_unref(graphics->font[FONT_REGULAR]);
-  g_object_unref(graphics->font[FONT_DOUBLE]);
+  pango_cairo_font_map_set_default(NULL);
+
+  pango_font_description_free(graphics->font[FONT_REGULAR]);
+  pango_font_description_free(graphics->font[FONT_DOUBLE]);
+
+  FcFini();
 
   free(graphics);
 }
@@ -246,6 +251,8 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
   g_object_unref(layout);
 
   cairo_destroy(cr);
+
+  cairo_surface_destroy(cairo_surface);
 
   SDL_UnlockTexture(texture);
 

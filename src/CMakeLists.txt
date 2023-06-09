@@ -1,5 +1,5 @@
 add_library(nihgfx "gfx.c")
-target_link_libraries(nihgfx PUBLIC cmake_base_compiler_options ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARY} ${GTK2_LIBRARIES})
+target_link_libraries(nihgfx PUBLIC cmake_base_compiler_options ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARY} ${GTK2_LIBRARIES} Fontconfig::Fontconfig)
 target_include_directories(nihgfx PUBLIC "${PROJECT_SOURCE_DIR}/include" ${GTK2_INCLUDE_DIRS})
 
 add_library(nihvt "vt.c")

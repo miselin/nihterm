@@ -20,6 +20,7 @@ find_package(SDL2_TTF REQUIRED)
 include_directories(${SDL2_TTF_INCLUDE_DIRS})
 
 find_package(GTK2 2.6 REQUIRED gtk)
+find_package(Fontconfig REQUIRED)
 
 add_subdirectory(src)
 
