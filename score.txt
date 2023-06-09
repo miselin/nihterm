@@ -18,8 +18,8 @@ Perfect score = 100 points.  Extra credit at end.
 
 [x]   5. Three identical lines of *'s (test of wrap mode)
 [x]   6. Test of tab setting/resetting
-[ ]   7. 132-column mode, light background
-[ ]   8. 80-column mode, light background
+[x]   7. 132-column mode, light background
+[x]   8. 80-column mode, light background
 [x]   9. 132-column mode, dark background
 [x]  10. 80-column mode, dark background
 [x]  11. Soft scroll down
@@ -35,34 +35,34 @@ Perfect score = 100 points.  Extra credit at end.
 [ ]  18. Normal blink distinct from all above
 [ ]  19. Normal underline blink distinct from all above
 [x]  20. Normal reverse ("negative") distinct from all above
-[ ]  21. Normal underline reverse distinct from all above
+[x]  21. Normal underline reverse distinct from all above
 [ ]  22. Normal blink reverse distinct from all above
 [ ]  23. Normal underline blink reverse distinct from all above
-[ ]  24. Bold distinct from all above
-[ ]  25. Bold underlined distinct from all above
+[x]  24. Bold distinct from all above
+[x]  25. Bold underlined distinct from all above
 [ ]  26. Bold blink distinct from all above
 [ ]  27. Bold underline blink distinct from all above
-[ ]  28. Bold reverse ("negative") distinct from all above
-[ ]  29. Bold underline reverse distinct from all above
+[x]  28. Bold reverse ("negative") distinct from all above
+[x]  29. Bold underline reverse distinct from all above
 [ ]  30. Bold blink reverse distinct from all above
 [ ]  31. Bold underline blink reverse distinct from all above
 
      Graphic Rendition test pattern, light background
 
-[ ]  32. Normal ("vanilla")
-[ ]  33. Normal underlined distinct from normal
+[x]  32. Normal ("vanilla")
+[x]  33. Normal underlined distinct from normal
 [ ]  34. Normal blink distinct from all above
 [ ]  35. Normal underline blink distinct from all above
-[ ]  36. Normal reverse ("negative") distinct from all above
-[ ]  37. Normal underline reverse distinct from all above
+[x]  36. Normal reverse ("negative") distinct from all above
+[x]  37. Normal underline reverse distinct from all above
 [ ]  38. Normal blink reverse distinct from all above
 [ ]  39. Normal underline blink reverse distinct from all above
-[ ]  40. Bold distinct from all above
-[ ]  41. Bold underlined distinct from all above
+[x]  40. Bold distinct from all above
+[x]  41. Bold underlined distinct from all above
 [ ]  42. Bold blink distinct from all above
 [ ]  43. Bold underline blink distinct from all above
-[ ]  44. Bold reverse ("negative") distinct from all above
-[ ]  45. Bold underline reverse distinct from all above
+[x]  44. Bold reverse ("negative") distinct from all above
+[x]  45. Bold underline reverse distinct from all above
 [ ]  46. Bold blink reverse distinct from all above
 [ ]  47. Bold underline blink reverse distinct from all above
 
@@ -74,10 +74,10 @@ Perfect score = 100 points.  Extra credit at end.
 
 3. Test of character sets
 
-[ ]  51. UK/National shows Pound Sterling sign in 3rd position
-[ ]  52. US ASCII shows number sign in 3rd position
-[ ]  53. SO/SI works (right columns identical with left columns)
-[ ]  54. True special graphics & line drawing chars, not simulated by ASCII
+[x]  51. UK/National shows Pound Sterling sign in 3rd position
+[x]  52. US ASCII shows number sign in 3rd position
+[x]  53. SO/SI works (right columns identical with left columns)
+[x]  54. True special graphics & line drawing chars, not simulated by ASCII
 
 4. Test of double-sized chars
 
@@ -141,13 +141,13 @@ Perfect score = 100 points.  Extra credit at end.
 
 [ ]  89. Insert/delete line, 80 columns
 [x]  90. Insert (character) mode, 80 columns
-[ ]  91. Delete character, 80 columns
+[x]  91. Delete character, 80 columns
 [x]  92. Right column staggered by 1 (normal chars), 80 columns
 [ ]  93. Right column staggered by 1 (double-wide chars), 80 columns
 [ ]  94. ANSI insert character, 80 columns
 [ ]  95. Insert/delete line, 132 columns
 [x]  96. Insert (character) mode, 132 columns
-[ ]  97. Delete character, 132 columns
+[x]  97. Delete character, 132 columns
 [x]  98. Right column staggered by 1 (normal chars), 132 columns
 [ ]  99. Right column staggered by 1 (double-wide chars), 132 columns
 [ ] 100. ANSI insert character, 132 columns

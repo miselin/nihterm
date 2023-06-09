@@ -78,6 +78,9 @@ struct vt {
   // G0/G1
   int charset;
 
+  int charset_g0;
+  int charset_g1;
+
   struct cellattr current_attr;
 
   int saved_x;
@@ -282,10 +285,16 @@ static void process_char(struct vt *vt, char c) {
     vt->lcf = 0;
     break;
   case '\016':
-    vt->charset = 1;
+    // Shift-Out (SO)
+    // TODO: invoke G1 character set
+    vt->charset = vt->charset_g1;
+    fprintf(stderr, "SO: invoking charset %d\n", vt->charset);
     break;
   case '\017':
-    vt->charset = 0;
+    // Shift-In (SI)
+    // TODO: invoke G0 character set
+    vt->charset = vt->charset_g0;
+    fprintf(stderr, "SI: invoking charset %d\n", vt->charset);
     break;
   default:
     // fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
@@ -360,34 +369,7 @@ static void process_char(struct vt *vt, char c) {
     }
     // fprintf(stderr, "cursor: %d, %d\n", vt->cx, vt->cy);
   } else {
-    switch (c) {
-    case '\005':
-      // ENQ: Enquiry
-      write_retry(vt->pty, "\033[?1;2c", 7);
-      break;
-    case '\010':
-      cursor_back(vt, 1);
-      break;
-    case '\n':
-    case '\013':
-    case '\014':
-      cursor_down(vt, 1, 1);
-      break;
-    case '\r':
-      cursor_sol(vt);
-      break;
-    case '\t':
-      cursor_to(vt, next_tabstop(vt, vt->cx), vt->cy, 0);
-      break;
-    case '\016':
-      vt->charset = 1;
-      break;
-    case '\017':
-      vt->charset = 0;
-      break;
-    default:
-      fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
-    }
+    fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
   }
 }
 
@@ -683,12 +665,14 @@ static void handle_bracket_seq(struct vt *vt) {
   case 'L':
     // IL: Insert Line
     for (int i = 0; i < params[0]; ++i) {
+      fprintf(stderr, "insert_line\n");
       insert_line(vt);
     }
     break;
   case 'M':
     // DL: Delete Line
     for (int i = 0; i < params[0]; ++i) {
+      fprintf(stderr, "delete_line\n");
       delete_line(vt);
     }
     break;
@@ -1094,6 +1078,8 @@ static void delete_character(struct vt *vt) {
   row->cells[vt->cols - 1].attr = vt->current_attr;
 
   row->dirty = 1;
+
+  mark_damage(vt, vt->cx, vt->cy, vt->cols - vt->cx, 1);
 }
 
 static void delete_line(struct vt *vt) {
@@ -1118,6 +1104,11 @@ static void insert_line(struct vt *vt) {
   if (vt->cy > 0) {
     prev = get_row(vt, vt->cy, NULL);
   }
+
+  // TODO: "Lines moved past the bottom margin are lost."
+  // when the scrolling margin is set we need to delete a row somewhere
+
+  // ... also screen_insert_line does not actually delete any rows
 
   screen_insert_line(vt, prev);
 
@@ -1248,46 +1239,97 @@ static void end_sequence(struct vt *vt) {
   memset(vt->sequence, 0, sizeof(vt->sequence));
 }
 
+#if 0
+/*
+ * If g is zero,
+ *    designate G0 as character set c
+ *    designate G1 as character set B (ASCII)
+ *    shift-in (select G0 into GL).
+ * If g is nonzero
+ *    designate G0 as character set B (ASCII)
+ *    designate G1 as character set c
+ *    shift-out (select G1 into GL).
+ * See also scs_normal() and scs_graphics().
+ */
+void scs(int g, int c) /* Select character Set */
+{
+  char temp[10];
+
+  sprintf(temp, "%c%c", g ? ')' : '(', c);
+  esc(temp);
+
+  // ^ g == 1, )<c>
+  // ^ g == 0, (<c>
+
+  sprintf(temp, "%c%c", g ? '(' : ')', 'B');
+  esc(temp);
+
+  // ^ g == 1, (B
+  // ^ g == 0, )B
+
+  print_chr(g ? SO : SI);
+
+  // ^ g == 1, SO
+  // ^ g == 0, SI
+  padding(4);
+}
+#endif
+
 static void handle_paren_seq(struct vt *vt) {
   if (vt->seqidx < 2) {
     return;
   }
 
+  fprintf(stderr, "paren: %s\n", vt->sequence);
+
+  int new_charset = 0;
   switch (vt->sequence[1]) {
   case 'A':
     // UK
-    // TODO
-    vt->charset = 0;
+    new_charset = 2;
     break;
   case 'B':
     // ASCII
-    vt->charset = 0;
+    new_charset = 0;
     break;
   case '0':
     // special graphics
-    vt->charset = 1;
+    new_charset = 1;
     break;
   case '1':
     // alternate standard characters
-    // TODO
-    vt->charset = 0;
+    new_charset = 0;
     break;
   case '2':
     // alternate special graphics
-    // TODO
-    vt->charset = 1;
+    new_charset = 1;
     break;
   }
+
+  if (vt->sequence[0] == '(') {
+    vt->charset_g0 = new_charset;
+  } else {
+    vt->charset_g1 = new_charset;
+  }
+
+  fprintf(stderr, " -> G0 %d, G1 %d\n", vt->charset_g0, vt->charset_g1);
 }
 
 void set_cp(struct vt *vt, struct cell *cell, char c) {
   memset(cell->cp, 0, 5);
 
   // standard charset
-  if (vt->charset == 0) {
-    cell->cp[0] = c;
-    cell->cp[1] = 0;
-    cell->cp_len = 1;
+  if (vt->charset == 0 || vt->charset == 2) {
+    if (vt->charset == 2 && c == '#') {
+      // UK character set: pound sign instead of #
+      cell->cp[0] = '\xc2';
+      cell->cp[1] = '\xa3';
+      cell->cp_len = 2;
+    } else {
+      cell->cp[0] = c;
+      cell->cp[1] = 0;
+      cell->cp_len = 1;
+    }
     return;
   }
 

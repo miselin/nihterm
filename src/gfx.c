@@ -54,7 +54,7 @@ struct graphics *create_graphics() {
   g_object_unref(context);
 
   graphics->cellw =
-      pango_font_metrics_get_approximate_char_width(metrics) / PANGO_SCALE;
+      pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE;
   graphics->cellh = (pango_font_metrics_get_ascent(metrics) +
                      pango_font_metrics_get_descent(metrics)) /
                     PANGO_SCALE;
