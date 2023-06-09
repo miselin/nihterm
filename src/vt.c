@@ -1083,8 +1083,17 @@ static void delete_character(struct vt *vt) {
 }
 
 static void delete_line(struct vt *vt) {
+  // deletion is ignored if the cursor is outside the scrolling region
+  if (vt->cy < vt->margin_top || vt->cy > vt->margin_bottom) {
+    return;
+  }
+
   struct row *prev = NULL;
   struct row *row = get_row(vt, vt->cy, &prev);
+
+  struct row *bottom_prev = NULL;
+  struct row *bottom = get_row(vt, vt->margin_bottom, &bottom_prev);
+
   if (!prev) {
     vt->screen = row->next;
   } else {
@@ -1096,19 +1105,30 @@ static void delete_line(struct vt *vt) {
 
   free_row(row);
 
-  append_line(vt, NULL);
+  screen_insert_line(vt, bottom);
 }
 
 static void insert_line(struct vt *vt) {
+  // insertion is ignored if the cursor is outside the scrolling region
+  if (vt->cy < vt->margin_top || vt->cy > vt->margin_bottom) {
+    return;
+  }
+
   struct row *prev = NULL;
   if (vt->cy > 0) {
     prev = get_row(vt, vt->cy, NULL);
   }
 
-  // TODO: "Lines moved past the bottom margin are lost."
-  // when the scrolling margin is set we need to delete a row somewhere
+  struct row *bottom_prev = NULL;
+  struct row *bottom = get_row(vt, vt->margin_bottom - 2, &bottom_prev);
 
-  // ... also screen_insert_line does not actually delete any rows
+  if (bottom_prev) {
+    bottom_prev->next = bottom->next;
+  } else {
+    vt->screen = bottom->next;
+  }
+
+  free(bottom);
 
   screen_insert_line(vt, prev);
 

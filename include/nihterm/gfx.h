@@ -14,6 +14,8 @@ struct cellattr {
   int underline;
   int blink;
   int reverse;
+  int dblwide;
+  int dblheight;
 };
 
 struct cell {
