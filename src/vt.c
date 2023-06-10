@@ -202,7 +202,17 @@ int vt_process(struct vt *vt, const char *string, size_t length) {
 }
 
 ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
-  return write_retry(vt->pty, string, length);
+  ssize_t n = 0;
+  for (size_t i = 0; i < length; ++i) {
+    n += write_retry(vt->pty, &string[i], 1);
+
+    if (string[i] == '\r' && vt->mode.lnm) {
+      // LNM mode: send line feed on RETURN key
+      n += write_retry(vt->pty, "\n", 1);
+    }
+  }
+
+  return n;
 }
 
 void vt_render(struct vt *vt) {

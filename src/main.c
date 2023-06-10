@@ -91,8 +91,8 @@ int main(int argc, char *argv[]) {
     // setenv("LC_ALL", "en_US.UTF-8", 1);
     setenv("LC_ALL", "C", 1);
 
-    execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
-    // execl("/bin/bash", "bash", NULL);
+    // execl("/usr/bin/vttest", "/usr/bin/vttest", "-l", NULL);
+    execl("/bin/bash", "bash", NULL);
 
     fprintf(stderr, "nihterm: exit failed: %s\n", strerror(errno));
     exit(1);
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  struct vt *vt = vt_create(pty, 25, 80);
+  struct vt *vt = vt_create(pty, 24, 80);
   if (!vt) {
     fprintf(stderr, "nihterm: failed to initialize vt\n");
     return 1;

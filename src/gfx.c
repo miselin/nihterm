@@ -135,16 +135,131 @@ int process_queue(struct graphics *graphics) {
     switch (event.type) {
     case SDL_QUIT:
       return 1;
-    case SDL_TEXTINPUT:
-      fprintf(stderr, "textinput: '%s'\n", event.text.text);
-      vt_input(graphics->vt, event.text.text, strlen(event.text.text));
-      break;
+      //case SDL_TEXTINPUT:
+      //fprintf(stderr, "textinput: '%s'\n", event.text.text);
+      //vt_input(graphics->vt, event.text.text, strlen(event.text.text));
+      //break;
     case SDL_KEYUP:
+      fprintf(stderr, "sym %d/%c; mod %x\n", event.key.keysym.sym, event.key.keysym.sym, event.key.keysym.mod);
       switch (event.key.keysym.sym) {
       case SDLK_RETURN:
       case SDLK_RETURN2:
-        vt_input(graphics->vt, "\n", 1);
+        fprintf(stderr, "return\n");
+        vt_input(graphics->vt, "\r", 1);
         break;
+      case SDLK_BACKSPACE:
+        fprintf(stderr, "backspace\n");
+        vt_input(graphics->vt, "\b", 1);
+        break;
+      case SDLK_LEFT:
+        // TODO(miselin): there's mode setting at play here
+        vt_input(graphics->vt, "\033[D", 3);
+        break;
+      case SDLK_RIGHT:
+        // TODO(miselin): there's mode setting at play here
+        vt_input(graphics->vt, "\033[C", 3);
+        break;
+      case SDLK_UP:
+        // TODO(miselin): there's mode setting at play here
+        vt_input(graphics->vt, "\033[A", 3);
+        break;
+      case SDLK_DOWN:
+        // TODO(miselin): there's mode setting at play here
+        vt_input(graphics->vt, "\033[B", 3);
+        break;
+      default:
+        if (event.key.keysym.sym >= 0x20 && event.key.keysym.sym <= 0x7F) {
+          char buf[4] = {(char)event.key.keysym.sym, 0, 0, 0};
+          size_t buf_len = 1;
+
+          // ctrl-<key>
+          if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL)) {
+            if (buf[0] == ' ') {
+              buf[0] = '\0';
+            } else if (buf[0] == '`') {
+              buf[0] = '\036';
+            } else if (buf[0] == '?') {
+              buf[0] = '\036';
+            } else if (toupper(buf[0]) >= 'A' && toupper(buf[0]) <= ']') {
+              // A = \001, B = \002, etc
+              buf[0] = (char) (toupper(buf[0]) - '@');
+            }
+          } else if (event.key.keysym.mod & KMOD_SHIFT) {
+            if (event.key.keysym.mod & KMOD_CAPS) {
+              buf[0] = (char)tolower(buf[0]);
+            }
+
+            switch (buf[0]) {
+            case '0':
+              buf[0] = ')';
+              break;
+            case '1':
+              buf[0] = '!';
+              break;
+            case '2':
+              buf[0] = '@';
+              break;
+            case '3':
+              buf[0] = '#';
+              break;
+            case '4':
+              buf[0] = '$';
+              break;
+            case '5':
+              buf[0] = '%';
+              break;
+            case '6':
+              buf[0] = '^';
+              break;
+            case '7':
+              buf[0] = '&';
+              break;
+            case '8':
+              buf[0] = '*';
+              break;
+            case '9':
+              buf[0] = '(';
+              break;
+            case '-':
+              buf[0] = '_';
+              break;
+            case '=':
+              buf[0] = '+';
+              break;
+            case '`':
+              buf[0] = '~';
+              break;
+            case '[':
+              buf[0] = '{';
+              break;
+            case ']':
+              buf[0] = '}';
+              break;
+            case ';':
+              buf[0] = ':';
+              break;
+            case '\'':
+              buf[0] = '"';
+              break;
+            case '.':
+              buf[0] = '>';
+              break;
+            case ',':
+              buf[0] = '<';
+              break;
+            case '/':
+              buf[0] = '?';
+              break;
+            default:
+              buf[0] = (char)toupper(buf[0]);
+            }
+          } else if (event.key.keysym.mod & KMOD_CAPS) {
+            buf[0] = (char)toupper(buf[0]);
+          }
+
+          fprintf(stderr, "ascii sym\n");
+          vt_input(graphics->vt, buf, buf_len);
+        }
       }
       break;
     case SDL_WINDOWEVENT:
