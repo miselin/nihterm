@@ -476,6 +476,8 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup) {
       vt->margin_bottom);
   */
 
+  int dy = y - vt->cy;
+
   if (vt->cx == x && vt->cy == y) {
     return;
   }
@@ -492,24 +494,32 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup) {
     }
   }
 
-  if (vt->cy < vt->margin_top) {
-    if (scroll) {
-      int rows = vt->margin_top - vt->cy;
+  // unless we actually moved vertically, skip scroll checks
+  if (dy == 0) {
+    return;
+  }
+
+  int top = vt->margin_top;
+  int bottom = vt->margin_bottom;
+
+  if (vt->cy < top) {
+    if (scroll && !cup) {
+      int rows = top - vt->cy;
       for (int i = 0; i < rows; ++i) {
         scroll_down(vt);
       }
     }
 
-    vt->cy = vt->margin_top;
-  } else if (vt->cy > vt->margin_bottom) {
-    if (scroll) {
-      int rows = vt->cy - vt->margin_bottom;
+    vt->cy = top;
+  } else if (vt->cy > bottom) {
+    if (scroll && !cup) {
+      int rows = vt->cy - bottom;
       for (int i = 0; i < rows; ++i) {
         scroll_up(vt);
       }
     }
 
-    vt->cy = vt->margin_bottom;
+    vt->cy = bottom;
   }
 
   // fprintf(stderr, "cursor_to(%d, %d) => %d, %d\n", x, y, vt->cx, vt->cy);
@@ -680,6 +690,11 @@ static void handle_bracket_seq(struct vt *vt) {
         vt->current_attr.blink = 1;
       } else if (params[i] == 7) {
         vt->current_attr.reverse = 1;
+      } else if (params[i] == 0) {
+        vt->current_attr.bold = 0;
+        vt->current_attr.blink = 0;
+        vt->current_attr.reverse = 0;
+        vt->current_attr.underline = 0;
       }
     }
     break;
