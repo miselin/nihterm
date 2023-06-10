@@ -53,10 +53,10 @@ struct graphics *create_graphics() {
   g_object_unref(context);
 
   graphics->cellw =
-      pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE;
-  graphics->cellh = (pango_font_metrics_get_ascent(metrics) +
+    (size_t)(pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE);
+  graphics->cellh = (size_t)((pango_font_metrics_get_ascent(metrics) +
                      pango_font_metrics_get_descent(metrics)) /
-                    PANGO_SCALE;
+                             PANGO_SCALE);
 
   pango_font_metrics_unref(metrics);
 
@@ -182,8 +182,8 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
     pango_attr_list_insert(attrs, attr);
   }
 
-  int cellw = graphics->cellw;
-  int cellh = graphics->cellh;
+  int cellw = (int) graphics->cellw;
+  int cellh = (int) graphics->cellh;
 
   int srcw = cellw;
   int srch = cellh;
@@ -257,10 +257,10 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
   SDL_UnlockTexture(texture);
 
   SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), cellw,
-                     graphics->cellh};
+                     (int)graphics->cellh};
 
-  SDL_Rect source = {0, dblheight == 2 ? graphics->cellh : 0, cellw,
-                     dblwide ? srch : graphics->cellh};
+  SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0, cellw,
+                     dblwide ? srch : (int)graphics->cellh};
 
   SDL_RenderCopy(graphics->renderer, texture, &source, &target);
   SDL_DestroyTexture(texture);
