@@ -389,7 +389,9 @@ TEST(VTTest, VT100_ED_Start) {
   const char *testdata = read_testdata("test/testdata/alignment_half_alt.dat");
   EXPECT_NE(testdata, nullptr);
 
-  const char *teststr = "\033#8\033[13;1H\033[1J";
+  // move to end of 12th line, erase from there to beginning of screen
+  // ED includes cursor position
+  const char *teststr = "\033#8\033[12;80H\033[1J";
   vt_process(state.vt, teststr, strlen(teststr));
 
   vt_render(state.vt);
@@ -435,10 +437,12 @@ TEST(VTTest, VT100_EL_End) {
   const char *testdata = read_testdata("test/testdata/line_right.dat");
   EXPECT_NE(testdata, nullptr);
 
+  // write a full row of *'s
   for (int i = 0; i < 80; ++i) {
     vt_process(state.vt, "*", 1);
   }
 
+  // move cursor to x=40, then delete to start of line (includes cursor)
   const char *teststr = "\033[1;40H\033[1K";
   vt_process(state.vt, teststr, strlen(teststr));
 
