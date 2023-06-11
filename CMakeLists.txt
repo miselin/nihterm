@@ -26,8 +26,10 @@ add_subdirectory(src)
 
 option(NIH_BUILD_TESTS "Build tests" ON)
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NIH_BUILD_TESTS)
-    add_subdirectory(third_party/gtest)
+  add_subdirectory(third_party/gtest)
+  add_subdirectory(third_party/benchmark)
 
-    enable_testing()
-    add_subdirectory(test)
+  enable_testing()
+  add_subdirectory(test)
+  add_subdirectory(benchmark)
 endif()
