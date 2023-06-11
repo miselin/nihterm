@@ -49,6 +49,9 @@ struct vt {
   struct row *margin_top_row;
   struct row *margin_bottom_row;
 
+  int cached_y;
+  struct row *current_row;
+
   struct graphics *graphics;
 
   int in_sequence;
@@ -95,7 +98,6 @@ struct vt {
   char tabstops[132];
 };
 
-static void set_char_at(struct vt *vt, int x, int y, char c);
 static void set_char_in_row(struct vt *vt, struct row *row, int x, char c);
 static void insert_char_at(struct vt *vt, int x, int y, char c);
 
@@ -108,6 +110,7 @@ static void cursor_down(struct vt *vt, int count, int scroll);
 static void cursor_up(struct vt *vt, int count, int scroll);
 static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup);
 static void cursor_sol(struct vt *vt);
+static void cursor_moved(struct vt *vt);
 
 static void process_char(struct vt *vt, char c);
 static void do_sequence(struct vt *vt);
@@ -169,6 +172,8 @@ struct vt *vt_create(int pty, int rows, int cols) {
   for (int i = 0; i < 132; i++) {
     vt->tabstops[i] = (i % 8 == 0);
   }
+
+  vt->current_row = vt->screen;
 
   // set default modes
   vt->mode.decanm = 1;
@@ -338,7 +343,7 @@ static void process_char(struct vt *vt, char c) {
       insert_char_at(vt, vt->cx, vt->cy, c);
       mark_damage(vt, vt->cx, vt->cy, vt->cols - vt->cx, 1);
     } else {
-      set_char_at(vt, vt->cx, vt->cy, c);
+      set_char_in_row(vt, vt->current_row, vt->cx, c);
       mark_damage(vt, vt->cx, vt->cy, 1, 1);
     }
 
@@ -414,6 +419,7 @@ static void do_sequence(struct vt *vt) {
     vt->current_attr = vt->saved_attr;
     vt->charset = vt->saved_charset;
     vt->lcf = vt->saved_lcf;
+    cursor_moved(vt);
     break;
   default:
     fprintf(stderr, "nihterm: unhandled sequence: %s\n", vt->sequence);
@@ -472,32 +478,32 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup) {
   }
 
   // unless we actually moved vertically, skip scroll checks
-  if (dy == 0) {
-    return;
+  if (dy != 0) {
+    int top = vt->margin_top;
+    int bottom = vt->margin_bottom;
+
+    if (vt->cy < top) {
+      if (scroll && !cup) {
+        int rows = top - vt->cy;
+        for (int i = 0; i < rows; ++i) {
+          scroll_down(vt);
+        }
+      }
+
+      vt->cy = top;
+    } else if (vt->cy > bottom) {
+      if (scroll && !cup) {
+        int rows = vt->cy - bottom;
+        for (int i = 0; i < rows; ++i) {
+          scroll_up(vt);
+        }
+      }
+
+      vt->cy = bottom;
+    }
   }
 
-  int top = vt->margin_top;
-  int bottom = vt->margin_bottom;
-
-  if (vt->cy < top) {
-    if (scroll && !cup) {
-      int rows = top - vt->cy;
-      for (int i = 0; i < rows; ++i) {
-        scroll_down(vt);
-      }
-    }
-
-    vt->cy = top;
-  } else if (vt->cy > bottom) {
-    if (scroll && !cup) {
-      int rows = vt->cy - bottom;
-      for (int i = 0; i < rows; ++i) {
-        scroll_up(vt);
-      }
-    }
-
-    vt->cy = bottom;
-  }
+  cursor_moved(vt);
 
   // fprintf(stderr, "cursor_to(%d, %d) => %d, %d\n", x, y, vt->cx, vt->cy);
 }
@@ -986,21 +992,6 @@ static void erase_screen_cursor(struct vt *vt, int before) {
   mark_damage(vt, 0, sy, vt->cols, ey - sy);
 }
 
-static void set_char_at(struct vt *vt, int x, int y, char c) {
-  if (y >= vt->rows) {
-    print_error("set_char_at out of bounds (y %d)\n", y);
-    return;
-  }
-
-  struct row *row = get_row(vt, y, NULL);
-  if (!row) {
-    print_error("set_char_at failed to get row %d\n", y);
-    return;
-  }
-
-  set_char_in_row(vt, row, x, c);
-}
-
 static void set_char_in_row(struct vt *vt, struct row *row, int x, char c) {
   if (x >= row_cols(vt, row)) {
     print_error("set_char_at out of bounds (x %d)\n", x);
@@ -1046,9 +1037,9 @@ static void scroll_up(struct vt *vt) {
     vt->screen = row->next;
   }
 
-  screen_insert_line(vt, bottom_row);
-
   free_row(row);
+
+  screen_insert_line(vt, bottom_row);
 
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
@@ -1058,10 +1049,10 @@ static void scroll_down(struct vt *vt) {
   get_row(vt, vt->margin_top, &prev);
   struct row *last_row = get_row(vt, vt->margin_bottom, &last_prev);
 
-  screen_insert_line(vt, prev);
-
   last_prev->next = last_row->next;
   free_row(last_row);
+
+  screen_insert_line(vt, prev);
 
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
@@ -1173,6 +1164,8 @@ static struct row *screen_insert_line(struct vt *vt, struct row *prev) {
     new_row->next = vt->screen;
     vt->screen = new_row;
   }
+
+  vt->current_row = get_row(vt, vt->cached_y, NULL);
 
   return new_row;
 }
@@ -1631,4 +1624,12 @@ void set_cp(struct vt *vt, struct cell *cell, char c) {
 
 static int row_cols(struct vt *vt, struct row *row) {
   return (row->dbl_width || row->dbl_height) ? vt->cols / 2 : vt->cols;
+}
+
+static void cursor_moved(struct vt *vt) {
+  if (vt->cached_y != vt->cy) {
+    struct row *new_row = get_row(vt, vt->cy, NULL);
+    vt->current_row = new_row;
+    vt->cached_y = vt->cy;
+  }
 }
