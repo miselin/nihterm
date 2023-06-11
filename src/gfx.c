@@ -140,15 +140,13 @@ int process_queue(struct graphics *graphics) {
       //vt_input(graphics->vt, event.text.text, strlen(event.text.text));
       //break;
     case SDL_KEYUP:
-      fprintf(stderr, "sym %d/%c; mod %x\n", event.key.keysym.sym, event.key.keysym.sym, event.key.keysym.mod);
+      // fprintf(stderr, "sym %d/%c; mod %x\n", event.key.keysym.sym, event.key.keysym.sym, event.key.keysym.mod);
       switch (event.key.keysym.sym) {
       case SDLK_RETURN:
       case SDLK_RETURN2:
-        fprintf(stderr, "return\n");
         vt_input(graphics->vt, "\r", 1);
         break;
       case SDLK_BACKSPACE:
-        fprintf(stderr, "backspace\n");
         vt_input(graphics->vt, "\b", 1);
         break;
       case SDLK_LEFT:
@@ -257,7 +255,6 @@ int process_queue(struct graphics *graphics) {
             buf[0] = (char)toupper(buf[0]);
           }
 
-          fprintf(stderr, "ascii sym\n");
           vt_input(graphics->vt, buf, buf_len);
         }
       }
@@ -285,17 +282,11 @@ void link_vt(struct graphics *graphics, struct vt *vt) { graphics->vt = vt; }
 
 void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
              int dblwide, int dblheight) {
-  int font_type = FONT_REGULAR;
+  chars_at(graphics, x, y, cell, 1, dblwide, dblheight);
+}
 
-  PangoAttrList *attrs = pango_attr_list_new();
-  if (cell->attr.bold) {
-    PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-    pango_attr_list_insert(attrs, attr);
-  }
-  if (cell->attr.underline) {
-    PangoAttribute *attr = pango_attr_underline_new(PANGO_UNDERLINE_SINGLE);
-    pango_attr_list_insert(attrs, attr);
-  }
+void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int count, int dblwide, int dblheight) {
+  int font_type = FONT_REGULAR;
 
   int cellw = (int) graphics->cellw;
   int cellh = (int) graphics->cellh;
@@ -324,46 +315,75 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
     // this should look better than the small font scaled _up_ though
     font_type = FONT_DOUBLE;
   }
-
+  
   SDL_Texture *texture =
       SDL_CreateTexture(graphics->renderer, SDL_PIXELFORMAT_ARGB8888,
-                        SDL_TEXTUREACCESS_STREAMING, srcw, srch);
+                        SDL_TEXTUREACCESS_STREAMING, srcw * count, srch);
 
   void *pixels;
   int pitch;
   SDL_LockTexture(texture, NULL, &pixels, &pitch);
 
   cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
-      pixels, CAIRO_FORMAT_ARGB32, srcw, srch, pitch);
+      pixels, CAIRO_FORMAT_ARGB32, srcw * count, srch, pitch);
 
   cairo_t *cr = cairo_create(cairo_surface);
 
-  PangoLayout *layout = pango_cairo_create_layout(cr);
-
-  pango_layout_set_attributes(layout, attrs);
-  pango_layout_set_font_description(layout, graphics->font[font_type]);
-  pango_layout_set_text(layout, cell->cp, cell->cp_len);
-  pango_attr_list_unref(attrs);
-
   cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-  if (cell->attr.reverse ^ graphics->inverted) {
+  if (graphics->inverted) {
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
   } else {
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
   }
 
-  cairo_rectangle(cr, 0, 0, cellw, cellh);
+  cairo_rectangle(cr, count * cellw, 0, cellw, cellh);
   cairo_fill(cr);
+    
+  for (int i = 0; i < count; ++i) {
+    PangoLayout *layout = pango_cairo_create_layout(cr);
 
-  cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-  if (cell->attr.reverse ^ graphics->inverted) {
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
-  } else {
-    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+    struct cell *cell = cells + i;
+
+    PangoAttrList *attrs = pango_attr_list_new();
+    if (cell->attr.bold) {
+      PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+      pango_attr_list_insert(attrs, attr);
+    }
+    if (cell->attr.underline) {
+      PangoAttribute *attr = pango_attr_underline_new(PANGO_UNDERLINE_SINGLE);
+      pango_attr_list_insert(attrs, attr);
+    }
+
+    pango_layout_set_attributes(layout, attrs);
+    pango_layout_set_font_description(layout, graphics->font[font_type]);
+    pango_layout_set_text(layout, cell->cp, cell->cp_len);
+    pango_attr_list_unref(attrs);
+
+    // fix bg color for reversed cell
+    if (cell->attr.reverse) {
+      cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+      if (graphics->inverted) {
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+      } else {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+      }
+
+      cairo_rectangle(cr, count * cellw, 0, cellw, cellh);
+      cairo_fill(cr);
+    }
+
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    if (cell->attr.reverse ^ graphics->inverted) {
+      cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+    } else {
+      cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+    }
+
+    cairo_move_to(cr, i * srcw, 0);
+
+    pango_cairo_show_layout(cr, layout);
+    g_object_unref(layout);
   }
-
-  pango_cairo_show_layout(cr, layout);
-  g_object_unref(layout);
 
   cairo_destroy(cr);
 
@@ -371,10 +391,10 @@ void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
 
   SDL_UnlockTexture(texture);
 
-  SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), cellw,
+  SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), count * cellw,
                      (int)graphics->cellh};
 
-  SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0, cellw,
+  SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0, count * cellw,
                      dblwide ? srch : (int)graphics->cellh};
 
   SDL_RenderCopy(graphics->renderer, texture, &source, &target);

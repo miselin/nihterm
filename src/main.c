@@ -127,10 +127,11 @@ int main(int argc, char *argv[]) {
     FD_ZERO(&readfds);
     FD_SET(pty, &readfds);
 
-    // we'll block for up to 100 ms looking for PTY data
+    // we'll block for up to 20 ms looking for PTY data
+    // this delay affects input latency.
     struct timeval tv;
     tv.tv_sec = 0;
-    tv.tv_usec = 100000;
+    tv.tv_usec = 20000;
     int ready = select(pty + 1, &readfds, NULL, NULL, &tv);
     if (ready > 0) {
       if (FD_ISSET(pty, &readfds)) {

@@ -92,12 +92,11 @@ struct vt {
   int saved_charset;
   struct cellattr saved_attr;
 
-  int redraw_all;
-
   char tabstops[132];
 };
 
 static void set_char_at(struct vt *vt, int x, int y, char c);
+static void set_char_in_row(struct vt *vt, struct row *row, int x, char c);
 static void insert_char_at(struct vt *vt, int x, int y, char c);
 
 static int row_cols(struct vt *vt, struct row *row);
@@ -218,17 +217,11 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 void vt_render(struct vt *vt) {
   struct damage *damage = vt->damage;
   while (damage) {
-    // redraw_all hits a different code path
-    if (vt->graphics && !vt->redraw_all) {
-      graphics_clear(vt->graphics, damage->x, damage->y, damage->w, damage->h);
-
+    if (vt->graphics) {
       for (int y = damage->y; y < (damage->y + damage->h); ++y) {
         struct row *row = get_row(vt, y, NULL);
-        for (int x = damage->x;
-             x < (damage->x + damage->w) && x < row_cols(vt, row); ++x) {
-          char_at(vt->graphics, x, y, &row->cells[x], row->dbl_width,
-                  row->dbl_height ? row->dbl_side + 1 : 0);
-        }
+          chars_at(vt->graphics, damage->x, y, &row->cells[damage->x], damage->w, row->dbl_width,
+            row->dbl_height ? row->dbl_side + 1 : 0);
       }
     }
 
@@ -238,29 +231,6 @@ void vt_render(struct vt *vt) {
   }
 
   vt->damage = NULL;
-
-  if (!vt->graphics) {
-    return;
-  } else if (!vt->redraw_all) {
-    return;
-  }
-
-  graphics_clear(vt->graphics, 0, 0, vt->cols, vt->rows);
-
-  struct row *row = vt->screen;
-  int y = 0;
-  while (row) {
-    for (int i = 0; i < row_cols(vt, row); i++) {
-      char_at(vt->graphics, i, y, &row->cells[i], row->dbl_width,
-              row->dbl_height ? row->dbl_side + 1 : 0);
-    }
-
-    row->dirty = 0;
-    row = row->next;
-    ++y;
-  }
-
-  vt->redraw_all = 0;
 }
 
 static void process_char(struct vt *vt, char c) {
@@ -306,13 +276,11 @@ static void process_char(struct vt *vt, char c) {
     // Shift-Out (SO)
     // TODO: invoke G1 character set
     vt->charset = vt->charset_g1;
-    fprintf(stderr, "SO: invoking charset %d\n", vt->charset);
     break;
   case '\017':
     // Shift-In (SI)
     // TODO: invoke G0 character set
     vt->charset = vt->charset_g0;
-    fprintf(stderr, "SI: invoking charset %d\n", vt->charset);
     break;
   default:
     // fprintf(stderr, "nihterm: unknown character: %c/%d\n", c, c);
@@ -394,7 +362,7 @@ static void process_char(struct vt *vt, char c) {
 static void do_sequence(struct vt *vt) {
   vt->sequence[vt->seqidx] = '\0';
 
-  fprintf(stderr, "handling sequence %s\n", vt->sequence);
+  // fprintf(stderr, "handling sequence %s\n", vt->sequence);
 
   switch (vt->sequence[0]) {
   case '[':
@@ -419,7 +387,6 @@ static void do_sequence(struct vt *vt) {
     break;
   case 'M':
     // Reverse Index
-    fprintf(stderr, "reverse index: y=%d top=%d\n", vt->cy, vt->margin_top);
     cursor_up(vt, 1, 1);
     vt->lcf = 0;
     break;
@@ -536,7 +503,56 @@ static void cursor_to(struct vt *vt, int x, int y, int scroll, int cup) {
 }
 
 static void mark_damage(struct vt *vt, int x, int y, int w, int h) {
-  // TODO(miselin): merge regions if they overlap appropriately
+  int left = x;
+  int right = x + w;
+  int top = y;
+  int bottom = y + h;
+
+  struct damage *dmg = vt->damage;
+  while (dmg) {
+    // fully enclosed?
+    if (dmg->x <= left && (dmg->x + dmg->w) >= right) {
+      if (dmg->y <= top && (dmg->y + dmg->h) >= bottom) {
+        // fprintf(stderr, "redundant damage (enclosed): A\n");
+        return;
+      }
+    }
+
+    // alternate full enclosure (new damage fully encloses this damage)
+    if (left <= dmg->x && right >= (dmg->x + dmg->w)) {
+      if (top <= dmg->y && top >= (dmg->y + dmg->h)) {
+        dmg->x = left;
+        dmg->y = top;
+        dmg->w = w;
+        dmg->h = h;
+        // fprintf(stderr, "redundant damage (enclosed): B\n");
+        return;
+      }
+    }
+
+    // can we extend on the X axis?
+    int merged = 0;
+    if (dmg->y == y && dmg->h == h) {
+      if (left < dmg->x) {
+        dmg->w += dmg->x - left;
+        dmg->x = left;
+        merged = 1;
+      }
+
+      if (right > (dmg->x + dmg->w)) {
+        dmg->w += right - (dmg->x + dmg->w);
+        merged = 1;
+      }
+
+      if (merged) {
+        // fprintf(stderr, "redundant damage (merged X)\n");
+        return;
+      }
+    }
+
+    dmg = dmg->next;
+  }
+
   struct damage *damage = (struct damage *)calloc(sizeof(struct damage), 1);
   damage->x = x;
   damage->y = y;
@@ -577,8 +593,10 @@ static void handle_bracket_seq(struct vt *vt) {
 
   get_params(vt->sequence + 1, params, &num_params);
 
+  /*
   fprintf(stderr, "params: count=%d %d %d %d %d %d %d\n", num_params, params[0],
           params[1], params[2], params[3], params[4], params[5]);
+  */
 
   char last = vt->sequence[vt->seqidx - 1];
   switch (last) {
@@ -591,8 +609,7 @@ static void handle_bracket_seq(struct vt *vt) {
     }
     break;
   case 'r':
-    fprintf(stderr, "DECSTBM: num=%d %d %d [%s]\n", num_params, params[0],
-            params[1], vt->sequence);
+    // fprintf(stderr, "DECSTBM: num=%d %d %d [%s]\n", num_params, params[0], params[1], vt->sequence);
     if (num_params == 0) {
       vt->margin_top = 0;
       vt->margin_bottom = vt->rows - 1;
@@ -718,14 +735,12 @@ static void handle_bracket_seq(struct vt *vt) {
   case 'L':
     // IL: Insert Line
     for (int i = 0; i < params[0]; ++i) {
-      fprintf(stderr, "insert_line\n");
       insert_line(vt);
     }
     break;
   case 'M':
     // DL: Delete Line
     for (int i = 0; i < params[0]; ++i) {
-      fprintf(stderr, "delete_line\n");
       delete_line(vt);
     }
     break;
@@ -818,8 +833,7 @@ static void handle_modes(struct vt *vt, int set) {
         graphics_invert(vt->graphics, set);
       }
 
-      // full redraw, entire screen changed
-      vt->redraw_all = 1;
+      mark_damage(vt, 0, 0, vt->cols, vt->rows);
       break;
     case 6:
       // DECOM (set = Relative, reset = Absolute)
@@ -864,8 +878,6 @@ static void handle_modes(struct vt *vt, int set) {
     return;
   }
 
-  fprintf(stderr, "mode %d: %d\n", set, param);
-
   switch (param) {
   case 2:
     // KAM (set = Locked, reset = Unlocked)
@@ -889,15 +901,12 @@ static void handle_modes(struct vt *vt, int set) {
 }
 
 static void handle_erases(struct vt *vt, int line, int n) {
-  fprintf(stderr, "erase %d %d\n", line, n);
   switch (n) {
   case 0:
     // cursor to end of line/screen
     if (line == 1) {
-      fprintf(stderr, "erase cursor to end of line\n");
       erase_line_cursor(vt, 0);
     } else {
-      fprintf(stderr, "erase cursor to end of screen\n");
       erase_screen_cursor(vt, 0);
     }
     break;
@@ -924,7 +933,7 @@ static void erase_line(struct vt *vt) {
   struct row *row = get_row(vt, vt->cy, NULL);
 
   for (int x = 0; x < row_cols(vt, row); ++x) {
-    set_char_at(vt, x, vt->cy, ' ');
+    set_char_in_row(vt, row, x, ' ');
   }
 
   mark_damage(vt, 0, vt->cy, vt->cols, 1);
@@ -937,7 +946,7 @@ static void erase_screen(struct vt *vt) {
     row->dbl_height = 0;
 
     for (int x = 0; x < row_cols(vt, row); ++x) {
-      set_char_at(vt, x, y, ' ');
+      set_char_in_row(vt, row, x, ' ');
     }
   }
 
@@ -945,17 +954,12 @@ static void erase_screen(struct vt *vt) {
 }
 
 static void erase_line_cursor(struct vt *vt, int before) {
-  fprintf(stderr, "erase_line_cursor: before=%d cx=%d cy=%d\n", before, vt->cx,
-          vt->cy);
-
   struct row *row = get_row(vt, vt->cy, NULL);
 
   int sx = before ? 0 : vt->cx;
   int ex = before ? vt->cx + 1 : row_cols(vt, row);
-  fprintf(stderr, "erase_line_cursor: %d %d\n", sx, ex);
   for (int x = sx; x < ex; ++x) {
-    fprintf(stderr, "erase %d %d\n", x, vt->cy);
-    set_char_at(vt, x, vt->cy, ' ');
+    set_char_in_row(vt, row, x, ' ');
   }
 
   mark_damage(vt, sx, vt->cy, ex - sx, 1);
@@ -971,7 +975,7 @@ static void erase_screen_cursor(struct vt *vt, int before) {
     row->dbl_height = 0;
 
     for (int x = 0; x < row_cols(vt, row); ++x) {
-      set_char_at(vt, x, y, ' ');
+      set_char_in_row(vt, row, x, ' ');
     }
   }
 
@@ -994,6 +998,10 @@ static void set_char_at(struct vt *vt, int x, int y, char c) {
     return;
   }
 
+  set_char_in_row(vt, row, x, c);
+}
+
+static void set_char_in_row(struct vt *vt, struct row *row, int x, char c) {
   if (x >= row_cols(vt, row)) {
     print_error("set_char_at out of bounds (x %d)\n", x);
     return;
@@ -1028,9 +1036,6 @@ static void insert_char_at(struct vt *vt, int x, int y, char c) {
 }
 
 static void scroll_up(struct vt *vt) {
-  fprintf(stderr, "scroll_up: %d %d [%d..%d]\n", vt->rows, vt->cy,
-          vt->margin_top, vt->margin_bottom);
-
   struct row *prev = NULL;
   struct row *row = get_row(vt, vt->margin_top, &prev);
   struct row *bottom_row = get_row(vt, vt->margin_bottom, NULL);
@@ -1045,15 +1050,10 @@ static void scroll_up(struct vt *vt) {
 
   free_row(row);
 
-  vt->redraw_all = 1;
-
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
 
 static void scroll_down(struct vt *vt) {
-  fprintf(stderr, "scroll_down: %d %d [%d..%d]\n", vt->rows, vt->cy,
-          vt->margin_top, vt->margin_bottom);
-
   struct row *prev = NULL, *last_prev = NULL;
   get_row(vt, vt->margin_top, &prev);
   struct row *last_row = get_row(vt, vt->margin_bottom, &last_prev);
@@ -1063,13 +1063,11 @@ static void scroll_down(struct vt *vt) {
   last_prev->next = last_row->next;
   free_row(last_row);
 
-  vt->redraw_all = 1;
-
   mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
 }
 
 static void handle_pound_seq(struct vt *vt) {
-  fprintf(stderr, "pound seq: %s\n", vt->sequence);
+  // fprintf(stderr, "pound seq: %s\n", vt->sequence);
   int became_doublewidth = 0;
   switch (vt->sequence[1]) {
   case '3': {
@@ -1212,12 +1210,11 @@ static void delete_line(struct vt *vt) {
     prev->next = row->next;
   }
 
-  // lazy
-  vt->redraw_all = 1;
-
   free_row(row);
 
   screen_insert_line(vt, bottom);
+
+  mark_damage(vt, 0, vt->cy, vt->cols, vt->rows - vt->cy);
 }
 
 static void insert_line(struct vt *vt) {
@@ -1244,8 +1241,7 @@ static void insert_line(struct vt *vt) {
 
   screen_insert_line(vt, prev);
 
-  // lazy
-  vt->redraw_all = 1;
+  mark_damage(vt, 0, vt->cy, vt->cols, vt->rows - vt->cy);
 }
 
 void vt_fill(struct vt *vt, char **buffer) {
@@ -1298,7 +1294,7 @@ static int next_tabstop(struct vt *vt, int x) {
 }
 
 static void do_vt52(struct vt *vt) {
-  fprintf(stderr, "vt52: %s\n", vt->sequence);
+  // fprintf(stderr, "vt52: %s\n", vt->sequence);
 
   switch (vt->sequence[0]) {
   case 'A':
@@ -1374,48 +1370,12 @@ static void end_sequence(struct vt *vt) {
   memset(vt->sequence, 0, sizeof(vt->sequence));
 }
 
-#if 0
-/*
- * If g is zero,
- *    designate G0 as character set c
- *    designate G1 as character set B (ASCII)
- *    shift-in (select G0 into GL).
- * If g is nonzero
- *    designate G0 as character set B (ASCII)
- *    designate G1 as character set c
- *    shift-out (select G1 into GL).
- * See also scs_normal() and scs_graphics().
- */
-void scs(int g, int c) /* Select character Set */
-{
-  char temp[10];
-
-  sprintf(temp, "%c%c", g ? ')' : '(', c);
-  esc(temp);
-
-  // ^ g == 1, )<c>
-  // ^ g == 0, (<c>
-
-  sprintf(temp, "%c%c", g ? '(' : ')', 'B');
-  esc(temp);
-
-  // ^ g == 1, (B
-  // ^ g == 0, )B
-
-  print_chr(g ? SO : SI);
-
-  // ^ g == 1, SO
-  // ^ g == 0, SI
-  padding(4);
-}
-#endif
-
 static void handle_paren_seq(struct vt *vt) {
   if (vt->seqidx < 2) {
     return;
   }
 
-  fprintf(stderr, "paren: %s\n", vt->sequence);
+  // fprintf(stderr, "paren: %s\n", vt->sequence);
 
   int new_charset = 0;
   switch (vt->sequence[1]) {
@@ -1447,7 +1407,7 @@ static void handle_paren_seq(struct vt *vt) {
     vt->charset_g1 = new_charset;
   }
 
-  fprintf(stderr, " -> G0 %d, G1 %d\n", vt->charset_g0, vt->charset_g1);
+  // fprintf(stderr, " -> G0 %d, G1 %d\n", vt->charset_g0, vt->charset_g1);
 }
 
 void set_cp(struct vt *vt, struct cell *cell, char c) {

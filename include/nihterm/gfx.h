@@ -42,6 +42,9 @@ void link_vt(struct graphics *graphics, struct vt *vt);
 // top, 2 for bottom).
 void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
              int dblwide, int dblheight);
+
+void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int count, int dblwide, int dblheight);
+
 void graphics_clear(struct graphics *graphics, int x, int y, int w, int h);
 
 void graphics_resize(struct graphics *graphics, int cols, int rows);
