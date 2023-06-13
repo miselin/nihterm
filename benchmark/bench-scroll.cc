@@ -57,6 +57,7 @@ struct teststate {
   int pty_child;
 };
 
+static void vt_printf(struct teststate &state, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void vt_printf(struct teststate &state, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);

@@ -14,7 +14,11 @@ if(MSVC)
     target_compile_options(cmake_base_compiler_options INTERFACE /WX)
   endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_definitions(cmake_base_compiler_options INTERFACE -D_XOPEN_SOURCE=600 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE=1)
+  target_compile_definitions(cmake_base_compiler_options
+                             INTERFACE -D_XOPEN_SOURCE=600
+                                       -D_POSIX_C_SOURCE=200809L
+                                       -D_DEFAULT_SOURCE=1
+                                       $<$<BOOL:APPLE>:_DARWIN_C_SOURCE=200809L>)
   target_compile_options(cmake_base_compiler_options
                          INTERFACE -Wall
                                    -Wextra

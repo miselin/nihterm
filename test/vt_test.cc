@@ -87,6 +87,7 @@ static ssize_t read_timeout(int fd, char *buf, size_t buflen, time_t seconds) {
   }
 }
 
+static void vt_printf(struct teststate &state, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void vt_printf(struct teststate &state, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);

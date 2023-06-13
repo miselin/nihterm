@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(nih-term LANGUAGES C CXX)
 
+set (CMAKE_C_STANDARD 99)
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
@@ -16,10 +18,8 @@ append_coverage_compiler_flags()
 find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIRS})
 
-find_package(SDL2_TTF REQUIRED)
-include_directories(${SDL2_TTF_INCLUDE_DIRS})
+find_package(pango REQUIRED)
 
-find_package(GTK2 2.6 REQUIRED gtk)
 find_package(Fontconfig REQUIRED)
 
 add_subdirectory(src)
