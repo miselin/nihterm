@@ -17,7 +17,7 @@ static int load_fonts(struct graphics *graphics);
 
 struct graphics {
   SDL_Window *window;
-  SDL_Renderer *renderer;
+  SDL_Surface *surface;
   PangoFontDescription *font[4];
 
   size_t xdim;
@@ -68,11 +68,9 @@ struct graphics *create_graphics() {
       "nihterm", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
       (int)graphics->xdim, (int)graphics->ydim, 0);
 
-  graphics->renderer =
-      SDL_CreateRenderer(graphics->window, -1, SDL_RENDERER_SOFTWARE);
-  SDL_SetRenderDrawColor(graphics->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  SDL_RenderClear(graphics->renderer);
-  SDL_RenderPresent(graphics->renderer);
+  graphics->surface = SDL_GetWindowSurface(graphics->window);
+  SDL_FillRect(graphics->surface, NULL, 0);
+  SDL_UpdateWindowSurface(graphics->window);
 
   graphics->dirty = 1;
 
@@ -105,7 +103,6 @@ static int load_fonts(struct graphics *graphics) {
 }
 
 void destroy_graphics(struct graphics *graphics) {
-  SDL_DestroyRenderer(graphics->renderer);
   SDL_DestroyWindow(graphics->window);
   SDL_Quit();
 
@@ -272,7 +269,7 @@ int process_queue(struct graphics *graphics) {
   }
 
   if (graphics->dirty) {
-    SDL_RenderPresent(graphics->renderer);
+    SDL_UpdateWindowSurface(graphics->window);
     graphics->dirty = 0;
   }
 
@@ -317,16 +314,15 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
     font_type = FONT_DOUBLE;
   }
   
-  SDL_Texture *texture =
-      SDL_CreateTexture(graphics->renderer, SDL_PIXELFORMAT_ARGB8888,
-                        SDL_TEXTUREACCESS_STREAMING, srcw * count, srch);
+  SDL_Surface *surface =
+    SDL_CreateRGBSurface(0, srcw * count, srch, 32, 0, 0, 0, 0);
 
-  void *pixels;
-  int pitch;
-  SDL_LockTexture(texture, NULL, &pixels, &pitch);
+  SDL_LockSurface(surface);
 
-  cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
-      pixels, CAIRO_FORMAT_ARGB32, srcw * count, srch, pitch);
+  void *pixels = surface->pixels;
+  int pitch = surface->pitch;
+
+  cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(pixels, CAIRO_FORMAT_ARGB32, srcw * count, srch, pitch);
 
   cairo_t *cr = cairo_create(cairo_surface);
 
@@ -390,7 +386,7 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
 
   cairo_surface_destroy(cairo_surface);
 
-  SDL_UnlockTexture(texture);
+  SDL_UnlockSurface(surface);
 
   SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), count * cellw,
                      (int)graphics->cellh};
@@ -398,8 +394,8 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
   SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0, count * cellw,
                      dblwide ? srch : (int)graphics->cellh};
 
-  SDL_RenderCopy(graphics->renderer, texture, &source, &target);
-  SDL_DestroyTexture(texture);
+  SDL_BlitSurface(surface, &source, graphics->surface, &target);
+  SDL_FreeSurface(surface);
 
   graphics->dirty = 1;
 }
@@ -410,12 +406,7 @@ void graphics_clear(struct graphics *graphics, int x, int y, int w, int h) {
                      (int)(w * (int)graphics->cellw),
                      (int)(h * (int)graphics->cellh)};
 
-  if (graphics->inverted) {
-    SDL_SetRenderDrawColor(graphics->renderer, 1, 1, 1, SDL_ALPHA_OPAQUE);
-  } else {
-    SDL_SetRenderDrawColor(graphics->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-  }
-  SDL_RenderFillRect(graphics->renderer, &target);
+  SDL_FillRect(graphics->surface, &target, graphics->inverted ? 0xFFFFFF : 0);
 }
 
 void graphics_resize(struct graphics *graphics, int cols, int rows) {
@@ -429,6 +420,9 @@ void graphics_resize(struct graphics *graphics, int cols, int rows) {
   graphics->ydim = new_ydim;
 
   SDL_SetWindowSize(graphics->window, (int)new_xdim, (int)new_ydim);
+
+  // resize invalidates the existing surface
+  graphics->surface = SDL_GetWindowSurface(graphics->window);
 }
 
 void graphics_invert(struct graphics *graphics, int invert) {
