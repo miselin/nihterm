@@ -1,6 +1,7 @@
 #ifndef _NIHTERM_GFX_H
 #define _NIHTERM_GFX_H 1
 
+#include <stddef.h>
 #include <stdint.h>
 
 // private contents, part of public API
@@ -22,7 +23,7 @@ struct cell {
   struct cellattr attr;
 };
 
-struct graphics *create_graphics();
+struct graphics *create_graphics(void);
 void destroy_graphics(struct graphics *graphics);
 
 size_t cell_width(struct graphics *graphics);
@@ -43,7 +44,8 @@ void link_vt(struct graphics *graphics, struct vt *vt);
 void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
              int dblwide, int dblheight);
 
-void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int count, int dblwide, int dblheight);
+void chars_at(struct graphics *graphics, int x, int y, struct cell *cells,
+              int count, int dblwide, int dblheight);
 
 void graphics_clear(struct graphics *graphics, int x, int y, int w, int h);
 
@@ -52,4 +54,4 @@ void graphics_resize(struct graphics *graphics, int cols, int rows);
 // Invert the colors of the terminal.
 void graphics_invert(struct graphics *graphics, int invert);
 
-#endif  // _NIHTERM_GFX_H
+#endif // _NIHTERM_GFX_H

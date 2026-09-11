@@ -1,9 +1,11 @@
 #ifndef _NIHTERM_VT_H
 #define _NIHTERM_VT_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
-#include <nihterm/gfx.h>
+#include "gfx.h"
 
 struct vt;
 
@@ -11,10 +13,41 @@ struct vt;
 extern "C" {
 #endif
 
+struct damage {
+  int x;
+  int y;
+  int w;
+  int h;
+  struct damage *next;
+};
+
+struct row {
+  struct cell cells[132];
+  struct row *next;
+  int dirty;
+
+  int dbl_height;
+  int dbl_side; // 0=top, 1=bottom
+  int dbl_width;
+};
+
+struct vt_callbacks {
+  // Pushed up when the terminal wishes to resize, e.g. for DECCOLM to swap to
+  // 132-column mode.
+  void (*on_resize)(void *user, int rows, int cols);
+
+  // Pushed up when the terminal should be rendered in inverted colors.
+  void (*invert)(void *user, int set);
+
+  // Pushed up to report damage requiring a re-render
+  void (*damage)(void *user, struct damage *chain);
+};
+
 struct vt *vt_create(int pty, int rows, int cols);
 void vt_destroy(struct vt *vt);
 
-void vt_set_graphics(struct vt *vt, struct graphics *graphics);
+void vt_set_callbacks(struct vt *vt, struct vt_callbacks *callbacks,
+                      void *user);
 
 // Process a string of bytes for rendering.
 int vt_process(struct vt *vt, const char *string, size_t length);
@@ -28,8 +61,10 @@ void vt_render(struct vt *vt);
 // Useful for testing.
 void vt_fill(struct vt *vt, char **buffer);
 
+struct row *vt_get_row(struct vt *vt, int row, struct row **prev);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
 
-#endif  // _NIHTERM_VT_H
+#endif // _NIHTERM_VT_H

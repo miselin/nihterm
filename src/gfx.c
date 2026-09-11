@@ -15,6 +15,16 @@
 
 static int load_fonts(struct graphics *graphics);
 
+static void vt_cb_resize(void *user, int rows, int cols);
+static void vt_cb_damage(void *user, struct damage *chain);
+static void vt_cb_invert(void *user, int set);
+
+struct vt_callbacks gfx_callbacks = {
+    .on_resize = vt_cb_resize,
+    .damage = vt_cb_damage,
+    .invert = vt_cb_invert,
+};
+
 struct graphics {
   SDL_Window *window;
   SDL_Surface *surface;
@@ -33,7 +43,7 @@ struct graphics {
   int inverted;
 };
 
-struct graphics *create_graphics() {
+struct graphics *create_graphics(void) {
   SDL_Init(SDL_INIT_VIDEO);
 
   struct graphics *graphics =
@@ -54,9 +64,10 @@ struct graphics *create_graphics() {
   g_object_unref(context);
 
   graphics->cellw =
-    (size_t)(pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE);
+      (size_t)(pango_font_metrics_get_approximate_digit_width(metrics) /
+               PANGO_SCALE);
   graphics->cellh = (size_t)((pango_font_metrics_get_ascent(metrics) +
-                     pango_font_metrics_get_descent(metrics)) /
+                              pango_font_metrics_get_descent(metrics)) /
                              PANGO_SCALE);
 
   pango_font_metrics_unref(metrics);
@@ -133,12 +144,13 @@ int process_queue(struct graphics *graphics) {
     switch (event.type) {
     case SDL_QUIT:
       return 1;
-      //case SDL_TEXTINPUT:
-      //fprintf(stderr, "textinput: '%s'\n", event.text.text);
-      //vt_input(graphics->vt, event.text.text, strlen(event.text.text));
-      //break;
+      // case SDL_TEXTINPUT:
+      // fprintf(stderr, "textinput: '%s'\n", event.text.text);
+      // vt_input(graphics->vt, event.text.text, strlen(event.text.text));
+      // break;
     case SDL_KEYUP:
-      // fprintf(stderr, "sym %d/%c; mod %x\n", event.key.keysym.sym, event.key.keysym.sym, event.key.keysym.mod);
+      // fprintf(stderr, "sym %d/%c; mod %x\n", event.key.keysym.sym,
+      // event.key.keysym.sym, event.key.keysym.mod);
       switch (event.key.keysym.sym) {
       case SDLK_RETURN:
       case SDLK_RETURN2:
@@ -178,7 +190,7 @@ int process_queue(struct graphics *graphics) {
               buf[0] = '\036';
             } else if (toupper(buf[0]) >= 'A' && toupper(buf[0]) <= ']') {
               // A = \001, B = \002, etc
-              buf[0] = (char) (toupper(buf[0]) - '@');
+              buf[0] = (char)(toupper(buf[0]) - '@');
             }
           } else if (event.key.keysym.mod & KMOD_SHIFT) {
             if (event.key.keysym.mod & KMOD_CAPS) {
@@ -276,18 +288,23 @@ int process_queue(struct graphics *graphics) {
   return 0;
 }
 
-void link_vt(struct graphics *graphics, struct vt *vt) { graphics->vt = vt; }
+void link_vt(struct graphics *graphics, struct vt *vt) {
+  graphics->vt = vt;
+
+  vt_set_callbacks(vt, &gfx_callbacks, graphics);
+}
 
 void char_at(struct graphics *graphics, int x, int y, struct cell *cell,
              int dblwide, int dblheight) {
   chars_at(graphics, x, y, cell, 1, dblwide, dblheight);
 }
 
-void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int count, int dblwide, int dblheight) {
+void chars_at(struct graphics *graphics, int x, int y, struct cell *cells,
+              int count, int dblwide, int dblheight) {
   int font_type = FONT_REGULAR;
 
-  int cellw = (int) graphics->cellw;
-  int cellh = (int) graphics->cellh;
+  int cellw = (int)graphics->cellw;
+  int cellh = (int)graphics->cellh;
 
   int srcw = cellw;
   int srch = cellh;
@@ -313,16 +330,17 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
     // this should look better than the small font scaled _up_ though
     font_type = FONT_DOUBLE;
   }
-  
+
   SDL_Surface *surface =
-    SDL_CreateRGBSurface(0, srcw * count, srch, 32, 0, 0, 0, 0);
+      SDL_CreateRGBSurface(0, srcw * count, srch, 32, 0, 0, 0, 0);
 
   SDL_LockSurface(surface);
 
   void *pixels = surface->pixels;
   int pitch = surface->pitch;
 
-  cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(pixels, CAIRO_FORMAT_ARGB32, srcw * count, srch, pitch);
+  cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
+      pixels, CAIRO_FORMAT_ARGB32, srcw * count, srch, pitch);
 
   cairo_t *cr = cairo_create(cairo_surface);
 
@@ -335,7 +353,7 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
 
   cairo_rectangle(cr, count * cellw, 0, cellw, cellh);
   cairo_fill(cr);
-    
+
   for (int i = 0; i < count; ++i) {
     PangoLayout *layout = pango_cairo_create_layout(cr);
 
@@ -388,11 +406,11 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
 
   SDL_UnlockSurface(surface);
 
-  SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh), count * cellw,
-                     (int)graphics->cellh};
+  SDL_Rect target = {(int)(x * cellw), (int)(y * (int)graphics->cellh),
+                     count * cellw, (int)graphics->cellh};
 
-  SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0, count * cellw,
-                     dblwide ? srch : (int)graphics->cellh};
+  SDL_Rect source = {0, dblheight == 2 ? (int)graphics->cellh : 0,
+                     count * cellw, dblwide ? srch : (int)graphics->cellh};
 
   SDL_BlitSurface(surface, &source, graphics->surface, &target);
   SDL_FreeSurface(surface);
@@ -401,10 +419,9 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells, int c
 }
 
 void graphics_clear(struct graphics *graphics, int x, int y, int w, int h) {
-  SDL_Rect target = {(int)(x * (int)graphics->cellw),
-                     (int)(y * (int)graphics->cellh),
-                     (int)(w * (int)graphics->cellw),
-                     (int)(h * (int)graphics->cellh)};
+  SDL_Rect target = {
+      (int)(x * (int)graphics->cellw), (int)(y * (int)graphics->cellh),
+      (int)(w * (int)graphics->cellw), (int)(h * (int)graphics->cellh)};
 
   SDL_FillRect(graphics->surface, &target, graphics->inverted ? 0xFFFFFF : 0);
 }
@@ -428,4 +445,26 @@ void graphics_resize(struct graphics *graphics, int cols, int rows) {
 void graphics_invert(struct graphics *graphics, int invert) {
   graphics->inverted = invert;
   graphics->dirty = 1;
+}
+
+static void vt_cb_resize(void *user, int rows, int cols) {
+  graphics_resize((struct graphics *)user, cols, rows);
+}
+
+static void vt_cb_damage(void *user, struct damage *chain) {
+  struct graphics *graphics = (struct graphics *)user;
+
+  while (chain) {
+    for (int y = chain->y; y < (chain->y + chain->h); ++y) {
+      struct row *row = vt_get_row(graphics->vt, y, NULL);
+      chars_at(graphics, chain->x, y, &row->cells[chain->x], chain->w,
+               row->dbl_width, row->dbl_height ? row->dbl_side + 1 : 0);
+    }
+
+    chain = chain->next;
+  }
+}
+
+static void vt_cb_invert(void *user, int set) {
+  graphics_invert((struct graphics *)user, set);
 }

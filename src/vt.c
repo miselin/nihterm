@@ -11,24 +11,6 @@
 
 #define print_error(...) fprintf(stderr, "nihterm: " __VA_ARGS__);
 
-struct damage {
-  int x;
-  int y;
-  int w;
-  int h;
-  struct damage *next;
-};
-
-struct row {
-  struct cell cells[132];
-  struct row *next;
-  int dirty;
-
-  int dbl_height;
-  int dbl_side; // 0=top, 1=bottom
-  int dbl_width;
-};
-
 struct vt {
   int pty;
 
@@ -52,7 +34,8 @@ struct vt {
   int cached_y;
   struct row *current_row;
 
-  struct graphics *graphics;
+  struct vt_callbacks *callbacks;
+  void *cb_user;
 
   int in_sequence;
   char sequence[64];
@@ -164,6 +147,8 @@ struct vt *vt_create(int pty, int rows, int cols) {
   vt->margin_left = 0;
   vt->margin_right = cols;
   vt->screen = NULL;
+  vt->callbacks = NULL;
+  vt->cb_user = NULL;
   struct row *prev = NULL;
   for (int i = 0; i < rows; i++) {
     prev = append_line(vt, prev);
@@ -192,9 +177,10 @@ void vt_destroy(struct vt *vt) {
   free(vt);
 }
 
-void vt_set_graphics(struct vt *vt, struct graphics *graphics) {
-  vt->graphics = graphics;
-  link_vt(graphics, vt);
+void vt_set_callbacks(struct vt *vt, struct vt_callbacks *callbacks,
+                      void *user) {
+  vt->callbacks = callbacks;
+  vt->cb_user = user;
 }
 
 int vt_process(struct vt *vt, const char *string, size_t length) {
@@ -220,16 +206,13 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 }
 
 void vt_render(struct vt *vt) {
+  if (vt->callbacks->damage) {
+    vt->callbacks->damage(vt->cb_user, vt->damage);
+  }
+
+  // clean up damages now that it's propagated
   struct damage *damage = vt->damage;
   while (damage) {
-    if (vt->graphics) {
-      for (int y = damage->y; y < (damage->y + damage->h); ++y) {
-        struct row *row = get_row(vt, y, NULL);
-          chars_at(vt->graphics, damage->x, y, &row->cells[damage->x], damage->w, row->dbl_width,
-            row->dbl_height ? row->dbl_side + 1 : 0);
-      }
-    }
-
     struct damage *tmp = damage;
     damage = damage->next;
     free(tmp);
@@ -615,7 +598,8 @@ static void handle_bracket_seq(struct vt *vt) {
     }
     break;
   case 'r':
-    // fprintf(stderr, "DECSTBM: num=%d %d %d [%s]\n", num_params, params[0], params[1], vt->sequence);
+    // fprintf(stderr, "DECSTBM: num=%d %d %d [%s]\n", num_params, params[0],
+    // params[1], vt->sequence);
     if (num_params == 0) {
       vt->margin_top = 0;
       vt->margin_bottom = vt->rows - 1;
@@ -820,8 +804,8 @@ static void handle_modes(struct vt *vt, int set) {
       }
       erase_screen(vt);
       cursor_home(vt);
-      if (vt->graphics) {
-        graphics_resize(vt->graphics, vt->cols, vt->rows);
+      if (vt->callbacks->on_resize) {
+        vt->callbacks->on_resize(vt->cb_user, vt->rows, vt->cols);
       }
       vt->margin_right = vt->cols;
 
@@ -835,8 +819,8 @@ static void handle_modes(struct vt *vt, int set) {
       // DECSCNM (set = Reverse, reset = Normal)
       vt->mode.decscnm = set;
 
-      if (vt->graphics) {
-        graphics_invert(vt->graphics, set);
+      if (vt->callbacks->invert) {
+        vt->callbacks->invert(vt->cb_user, set);
       }
 
       mark_damage(vt, 0, 0, vt->cols, vt->rows);
@@ -1254,6 +1238,10 @@ void vt_fill(struct vt *vt, char **buffer) {
     row = row->next;
     ++y;
   }
+}
+
+struct row *vt_get_row(struct vt *vt, int row, struct row **prev) {
+  return get_row(vt, row, prev);
 }
 
 static ssize_t write_retry(int fd, const char *buffer, size_t length) {

@@ -11,16 +11,16 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include <utmp.h>
-#include <time.h>
 
 #include <nihterm/gfx.h>
 #include <nihterm/vt.h>
 
 // SIGCHLD handler
 void sigchld(int sig) {
-  (void) sig;
+  (void)sig;
 
   // Reap the process
   pid_t pid = 0;
@@ -34,14 +34,15 @@ void sigchld(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-  (void) argc;
-  (void) argv;
+  (void)argc;
+  (void)argv;
 
   setsid();
 
   int pty = posix_openpt(O_RDWR);
   if (pty < 0) {
-    fprintf(stderr, "nihterm: could not get a pseudo-terminal: %s\n", strerror(errno));
+    fprintf(stderr, "nihterm: could not get a pseudo-terminal: %s\n",
+            strerror(errno));
     return 1;
   }
 
@@ -110,7 +111,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  vt_set_graphics(vt, graphics);
+  link_vt(graphics, vt);
 
   struct winsize pty_size;
   memset(&pty_size, 0, sizeof(pty_size));
@@ -156,13 +157,14 @@ int main(int argc, char *argv[]) {
 
         buffer[len] = 0;
 
-        vt_process(vt, buffer, (size_t) len);
+        vt_process(vt, buffer, (size_t)len);
       }
     }
 
     // regardless of what the PTY side did, we'll now handle SDL events
     if (process_queue(graphics)) {
-      // TODO(miselin): do we need to send a SIGKILL if the child fails to terminate?
+      // TODO(miselin): do we need to send a SIGKILL if the child fails to
+      // terminate?
       fprintf(stderr, "nihterm: debug: quit requested. going down\n");
       kill(child, SIGTERM);
       waitpid(child, NULL, 0);
