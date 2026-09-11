@@ -10,18 +10,7 @@ struct graphics;
 // forward-declare VT (circular header dependency)
 struct vt;
 
-struct cellattr {
-  int bold;
-  int underline;
-  int blink;
-  int reverse;
-};
-
-struct cell {
-  char cp[5];
-  int cp_len;
-  struct cellattr attr;
-};
+struct cell;
 
 struct graphics *create_graphics(void);
 void destroy_graphics(struct graphics *graphics);

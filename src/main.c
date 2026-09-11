@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  struct vt *vt = vt_create(pty, 24, 80);
+  struct vt *vt = vt_create(pty, 25, 80);
   if (!vt) {
     fprintf(stderr, "nihterm: failed to initialize vt\n");
     return 1;

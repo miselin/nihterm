@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 
 #include <nihterm/gfx.h>
+#include <nihterm/screen.h>
 #include <nihterm/vt.h>
 
 #include <cairo/cairo.h>
@@ -351,7 +352,7 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells,
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
   }
 
-  cairo_rectangle(cr, count * cellw, 0, cellw, cellh);
+  cairo_rectangle(cr, 0, 0, count * cellw, cellh);
   cairo_fill(cr);
 
   for (int i = 0; i < count; ++i) {
@@ -383,7 +384,7 @@ void chars_at(struct graphics *graphics, int x, int y, struct cell *cells,
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
       }
 
-      cairo_rectangle(cr, count * cellw, 0, cellw, cellh);
+      cairo_rectangle(cr, i * cellw, 0, cellw, cellh);
       cairo_fill(cr);
     }
 

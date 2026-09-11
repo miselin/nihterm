@@ -5,31 +5,14 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "gfx.h"
-
 struct vt;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct damage {
-  int x;
-  int y;
-  int w;
-  int h;
-  struct damage *next;
-};
-
-struct row {
-  struct cell cells[132];
-  struct row *next;
-  int dirty;
-
-  int dbl_height;
-  int dbl_side; // 0=top, 1=bottom
-  int dbl_width;
-};
+struct damage;
+struct row;
 
 struct vt_callbacks {
   // Pushed up when the terminal wishes to resize, e.g. for DECCOLM to swap to

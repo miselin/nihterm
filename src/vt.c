@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <nihterm/gfx.h>
+#include <nihterm/screen.h>
 #include <nihterm/vt.h>
 
 #define print_error(...) fprintf(stderr, "nihterm: " __VA_ARGS__);
@@ -206,7 +207,7 @@ ssize_t vt_input(struct vt *vt, const char *string, size_t length) {
 }
 
 void vt_render(struct vt *vt) {
-  if (vt->callbacks->damage) {
+  if (vt->callbacks && vt->callbacks->damage) {
     vt->callbacks->damage(vt->cb_user, vt->damage);
   }
 
@@ -804,7 +805,7 @@ static void handle_modes(struct vt *vt, int set) {
       }
       erase_screen(vt);
       cursor_home(vt);
-      if (vt->callbacks->on_resize) {
+      if (vt->callbacks && vt->callbacks->on_resize) {
         vt->callbacks->on_resize(vt->cb_user, vt->rows, vt->cols);
       }
       vt->margin_right = vt->cols;
@@ -819,7 +820,7 @@ static void handle_modes(struct vt *vt, int set) {
       // DECSCNM (set = Reverse, reset = Normal)
       vt->mode.decscnm = set;
 
-      if (vt->callbacks->invert) {
+      if (vt->callbacks && vt->callbacks->invert) {
         vt->callbacks->invert(vt->cb_user, set);
       }
 
@@ -1025,7 +1026,8 @@ static void scroll_up(struct vt *vt) {
 
   screen_insert_line(vt, bottom_row);
 
-  mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
+  mark_damage(vt, 0, vt->margin_top, vt->cols,
+              vt->margin_bottom - vt->margin_top + 1);
 }
 
 static void scroll_down(struct vt *vt) {
@@ -1038,7 +1040,8 @@ static void scroll_down(struct vt *vt) {
 
   screen_insert_line(vt, prev);
 
-  mark_damage(vt, 0, vt->margin_top, vt->cols, vt->margin_bottom);
+  mark_damage(vt, 0, vt->margin_top, vt->cols,
+              vt->margin_bottom - vt->margin_top + 1);
 }
 
 static void handle_pound_seq(struct vt *vt) {
@@ -1053,6 +1056,8 @@ static void handle_pound_seq(struct vt *vt) {
     row->dbl_width = 0;
 
     became_doublewidth = 1;
+
+    mark_damage(vt, 0, vt->cy, vt->cols, 1);
   } break;
   case '4': {
     // DECDHL - double height, bottom half
@@ -1062,12 +1067,16 @@ static void handle_pound_seq(struct vt *vt) {
     row->dbl_width = 0;
 
     became_doublewidth = 1;
+
+    mark_damage(vt, 0, vt->cy, vt->cols, 1);
   } break;
   case '5': {
     // DECSWL - single width, single height
     struct row *row = get_row(vt, vt->cy, NULL);
     row->dbl_height = 0;
     row->dbl_width = 0;
+
+    mark_damage(vt, 0, vt->cy, vt->cols, 1);
   } break;
   case '6': {
     // DECDWL - double width
@@ -1076,6 +1085,8 @@ static void handle_pound_seq(struct vt *vt) {
     row->dbl_height = 0;
 
     became_doublewidth = 1;
+
+    mark_damage(vt, 0, vt->cy, vt->cols, 1);
   } break;
   case '8':
     // DECALN
@@ -1090,6 +1101,8 @@ static void handle_pound_seq(struct vt *vt) {
         row = row->next;
       }
     }
+
+    mark_damage(vt, 0, 0, vt->cols, vt->rows);
     break;
   default:
     print_error("unknown pound sequence: %s\n", vt->sequence);
@@ -1187,9 +1200,9 @@ static void delete_line(struct vt *vt) {
     prev->next = row->next;
   }
 
-  free_row(row);
-
   screen_insert_line(vt, bottom);
+
+  free_row(row);
 
   mark_damage(vt, 0, vt->cy, vt->cols, vt->rows - vt->cy);
 }
@@ -1202,11 +1215,11 @@ static void insert_line(struct vt *vt) {
 
   struct row *prev = NULL;
   if (vt->cy > 0) {
-    prev = get_row(vt, vt->cy, NULL);
+    prev = get_row(vt, vt->cy - 1, NULL);
   }
 
   struct row *bottom_prev = NULL;
-  struct row *bottom = get_row(vt, vt->margin_bottom - 2, &bottom_prev);
+  struct row *bottom = get_row(vt, vt->margin_bottom, &bottom_prev);
 
   if (bottom_prev) {
     bottom_prev->next = bottom->next;
